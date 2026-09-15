@@ -1,0 +1,25 @@
+# Dados utilizados durante as aulas
+estado.json
+alunas.csv
+alunas_*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Variáveis e segredos
+.env
+.env.*
+!.env.example
+
+
+# Dados persistentes do Docker
+data/

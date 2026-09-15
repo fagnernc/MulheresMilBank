@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.env.*
+alunas.csv
+alunas_*.csv
+estado.json
+data/
+__pycache__/
+*.pyc
+.DS_Store

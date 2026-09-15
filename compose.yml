@@ -1,0 +1,17 @@
+services:
+  mulheresmilbank:
+    build: .
+    container_name: mulheresmilbank
+    restart: unless-stopped
+
+    environment:
+      DATA_DIR: /data
+      PORTA: 8000
+      CODIGO_ADMIN: ${CODIGO_ADMIN:?Defina CODIGO_ADMIN no arquivo .env}
+      SENHA_PADRAO: ${SENHA_PADRAO:?Defina SENHA_PADRAO no arquivo .env}
+
+    volumes:
+      - ./data:/data
+
+    ports:
+      - "8000:8000"
