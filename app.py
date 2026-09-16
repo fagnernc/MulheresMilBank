@@ -56,6 +56,7 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() in {
 }
 DOMINIO = os.environ.get("DOMINIO", "").strip()
 SESSAO_ADMIN_TTL = timedelta(hours=4)
+SESSAO_V2_TTL = timedelta(hours=2)
 V2_DB = storage.caminho_padrao_banco(DATA_DIR)
 V2_INICIALIZADA = False
 V2_DISPONIVEL = False
@@ -120,6 +121,7 @@ def valor_para_centavos(texto):
 lock = threading.Lock()
 sessoes = {}  # token -> codigo da aluna
 sessoes_admin = {}  # token -> instante de expiração da sessão do professor
+sessoes_v2 = {}  # token -> (aluna_id, instante de expiração)
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +806,12 @@ PAGINA_PROJECAO = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-
 </main><button class="tela-cheia" type="button" onclick="document.documentElement.requestFullscreen && document.documentElement.requestFullscreen()">Tela cheia</button></body></html>"""
 
 
+PAGINA_SENHA_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Redefinir senha - Mulheres Mil Bank</title>__ESTILO__</head><body><main><p><a href="/admin/turmas/__ID__">← Gerenciar turma</a></p><h1>Redefinir senha da turma</h1>__ERRO__<form class="cartao" method="POST" action="/admin/turmas/__ID__/senha"><label for="senha">Nova senha *</label><input id="senha" name="senha" type="password" required><label for="confirmacao">Confirme a nova senha *</label><input id="confirmacao" name="confirmacao" type="password" required><p class="aviso">A senha atual não pode ser recuperada ou exibida.</p><button type="submit">Atualizar senha</button></form></main></body></html>"""
+
+
+PAGINA_V2 = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mulheres Mil Bank</title><style>:root{--r:#5B2C82;--c:#FAF6EF;--e:#B23A2E;--s:#17643A}*{box-sizing:border-box}body{margin:0;background:var(--c);font-family:-apple-system,Arial,sans-serif;color:#1F2A28}.app{max-width:520px;margin:auto;min-height:100vh;padding:20px}.marca{text-align:center;color:var(--r);font-weight:800;letter-spacing:.08em}.card{background:#fff;border-radius:14px;padding:20px;margin:16px 0;box-shadow:0 3px 12px #0001}h1{color:var(--r);font-size:22px}label{display:block;margin:12px 0 5px;font-weight:700}input{width:100%;padding:12px;border:1px solid #ddd;border-radius:9px;font:inherit}button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:9px;background:var(--r);color:#fff;font-weight:800;font:inherit}.acoes{display:flex;gap:8px}.acoes button{font-size:13px}.saldo{font-size:30px;font-weight:800;color:var(--r)}.erro{color:var(--e);font-weight:700}.item{padding:12px 0;border-bottom:1px solid #eee}.mais{color:var(--s);font-weight:800}.menos{color:var(--e);font-weight:800}.oculto{display:none}</style></head><body><main class="app"><div class="marca">MULHERES MIL BANK</div><div id="app"></div></main><script>const q=s=>document.querySelector(s),e=s=>String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));let eu;async function api(p,o={}){let r=await fetch(p,{method:o.method||'GET',headers:{'Content-Type':'application/json'},body:o.body?JSON.stringify(o.body):undefined,credentials:'same-origin'}),d=await r.json();if(!r.ok)throw Error(d.erro||'Não foi possível concluir.');return d}function login(m=''){q('#app').innerHTML=`<div class="card"><h1>Entrar na atividade</h1><p>Use sua conta de seis dígitos e a senha informada pelo professor.</p><label>Conta</label><input id="conta" inputmode="numeric"><label>Senha</label><input id="senha" type="password"><button id="entrar">Entrar</button><p class="erro">${e(m)}</p></div>`;q('#entrar').onclick=async()=>{try{await api('/api/v2/login',{method:'POST',body:{conta:q('#conta').value.trim(),senha:q('#senha').value}});inicio()}catch(x){login(x.message)}}}async function inicio(){try{eu=await api('/api/v2/me')}catch(x){return login(x.message)}q('#app').innerHTML=`<div class="card"><h1>Olá, ${e(eu.nome)}</h1><p>Agência 001 · Conta ${e(eu.conta)}</p><p>Saldo fictício</p><div class="saldo">${e(eu.saldo)}</div></div><div class="acoes"><button id="pix">Fazer Pix</button><button id="extrato">Extrato</button><button id="sair">Sair</button></div>`;q('#pix').onclick=pix;q('#extrato').onclick=extrato;q('#sair').onclick=async()=>{await api('/api/v2/sair',{method:'POST'});login()}}function pix(m=''){q('#app').innerHTML=`<div class="card"><h1>Fazer Pix</h1><label>Conta de destino</label><input id="destino" inputmode="numeric"><label>Valor (R$)</label><input id="valor" inputmode="decimal"><button id="enviar">Confirmar Pix</button><button id="voltar">Voltar</button><p class="erro">${e(m)}</p></div>`;q('#voltar').onclick=inicio;q('#enviar').onclick=async()=>{if(!confirm('Confirmar este Pix?'))return;try{let r=await api('/api/v2/pix',{method:'POST',body:{conta_destino:q('#destino').value.trim(),valor:q('#valor').value.trim()}});q('#app').innerHTML=`<div class="card"><h1>Pix enviado</h1><p>${e(r.valor)} para ${e(r.nome)}.</p><button id="ok">Voltar</button></div>`;q('#ok').onclick=inicio}catch(x){pix(x.message)}}}async function extrato(){try{let itens=await api('/api/v2/extrato');q('#app').innerHTML=`<div class="card"><h1>Extrato</h1>${itens.map(i=>`<div class="item"><b>${i.tipo==='enviado'?'Pix enviado para':'Pix recebido de'} ${e(i.nome)}</b><br>Conta ${e(i.conta)} · ${e(i.quando)}<span class="${i.tipo==='enviado'?'menos':'mais'}"> ${i.sinal} ${e(i.valor)}</span></div>`).join('')||'<p>Nenhuma movimentação.</p>'}<button id="voltar">Voltar</button></div>`;q('#voltar').onclick=inicio}catch(x){login(x.message)}}(async()=>{try{await api('/api/v2/me');inicio()}catch(x){login()}})()</script></body></html>"""
+
+
 # ---------------------------------------------------------------------------
 # Servidor
 # ---------------------------------------------------------------------------
@@ -909,6 +917,33 @@ class Handler(BaseHTTPRequestHandler):
         )
         return False
 
+    def pegar_sessao_v2(self):
+        token = self.pegar_token_cookie("sessao_v2")
+        if token is None:
+            return None
+        with lock:
+            sessao = sessoes_v2.get(token)
+            if sessao is None or sessao[1] <= datetime.now():
+                sessoes_v2.pop(token, None)
+                return None
+            return sessao[0]
+
+    def exigir_aluna_v2(self):
+        aluna_id = self.pegar_sessao_v2()
+        if aluna_id is None:
+            self.enviar_json({"erro": "Sessão inválida. Entre novamente."}, status=401)
+            return None
+        try:
+            aluna = storage.buscar_aluna(V2_DB, aluna_id)
+            turma = storage.buscar_turma(V2_DB, aluna["turma_id"])
+        except storage.ErroStorage:
+            self.enviar_json({"erro": "Sessão inválida. Entre novamente."}, status=401)
+            return None
+        if storage.status_turma(turma) != "ATIVA":
+            self.enviar_json({"erro": "Esta turma não está disponível para operação."}, status=403)
+            return None
+        return aluna
+
     def data_hora_formulario(self, campos, prefixo):
         data = (campos.get(f"{prefixo}_data") or [""])[0]
         hora = (campos.get(f"{prefixo}_hora") or [""])[0]
@@ -924,6 +959,9 @@ class Handler(BaseHTTPRequestHandler):
         reais, centavos = divmod(valor, 100)
         numero = f"{reais:,}".replace(",", "X").replace(".", ",").replace("X", ".")
         return f"R$ {numero},{centavos:02d}"
+
+    def formatar_conta(self, codigo):
+        return f"{codigo[:3]} {codigo[3:]}"
 
     def id_turma_da_rota(self, caminho):
         partes = caminho.strip("/").split("/")
@@ -972,8 +1010,16 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(conteudo)
             return
 
-        if caminho in ("/", "/app"):
+        if caminho == "/":
+            self.enviar_html(PAGINA_V2)
+            return
+
+        if caminho in ("/app", "/v1"):
             self.enviar_html(PAGINA)
+            return
+
+        if caminho == "/v2":
+            self.enviar_html(PAGINA_V2)
             return
 
         if caminho == "/admin":
@@ -1039,6 +1085,44 @@ class Handler(BaseHTTPRequestHandler):
             self.mostrar_projecao(turma_id)
             return
 
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/senha":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_formulario_senha_turma(turma_id)
+            return
+
+        if caminho == "/api/v2/me":
+            if not self.exigir_v2_disponivel():
+                return
+            aluna = self.exigir_aluna_v2()
+            if aluna is None:
+                return
+            self.enviar_json({
+                "nome": aluna["nome"], "conta": self.formatar_conta(aluna["codigo_conta"]),
+                "saldo": self.formatar_centavos(aluna["saldo"]),
+            })
+            return
+
+        if caminho == "/api/v2/extrato":
+            if not self.exigir_v2_disponivel():
+                return
+            aluna = self.exigir_aluna_v2()
+            if aluna is None:
+                return
+            itens = []
+            for item in storage.listar_extrato_aluna(V2_DB, aluna["id"]):
+                itens.append({
+                    "tipo": item["tipo"], "nome": item["nome"],
+                    "conta": self.formatar_conta(item["codigo_conta"]),
+                    "quando": self.formatar_data_hora(item["criada_em"]),
+                    "valor": self.formatar_centavos(item["valor"]),
+                    "sinal": "-" if item["tipo"] == "enviado" else "+",
+                })
+            self.enviar_json(itens)
+            return
+
         if caminho == "/api/me":
             codigo = self.exigir_login()
             if codigo is None:
@@ -1088,6 +1172,70 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         caminho = urlparse(self.path).path
+
+        if caminho == "/api/v2/login":
+            if not self.exigir_v2_disponivel():
+                return
+            dados = self.ler_json()
+            conta = str(dados.get("conta", "")).strip()
+            senha = str(dados.get("senha", ""))
+            try:
+                aluna = storage.autenticar_aluna(V2_DB, conta, senha)
+            except storage.AutenticacaoInvalida:
+                self.enviar_json({"erro": "Conta ou senha incorreta."}, status=401)
+                return
+            except storage.TurmaInativa as erro:
+                self.enviar_json({"erro": str(erro)}, status=403)
+                return
+            token = secrets.token_urlsafe(32)
+            with lock:
+                sessoes_v2[token] = (aluna["id"], datetime.now() + SESSAO_V2_TTL)
+            self.send_response(200)
+            self.configurar_cookie_sessao("sessao_v2", token)
+            corpo = json.dumps({"ok": True}).encode("utf-8")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
+            return
+
+        if caminho == "/api/v2/sair":
+            token = self.pegar_token_cookie("sessao_v2")
+            if token:
+                with lock:
+                    sessoes_v2.pop(token, None)
+            self.send_response(200)
+            self.configurar_cookie_sessao("sessao_v2", "", expirar=True)
+            corpo = b'{"ok": true}'
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
+            return
+
+        if caminho == "/api/v2/pix":
+            if not self.exigir_v2_disponivel():
+                return
+            origem = self.exigir_aluna_v2()
+            if origem is None:
+                return
+            dados = self.ler_json()
+            try:
+                destino = storage.buscar_aluna_por_codigo(
+                    V2_DB, str(dados.get("conta_destino", "")).strip()
+                )
+                valor = valor_para_centavos(str(dados.get("valor", "")))
+                storage.executar_pix(V2_DB, origem["turma_id"], origem["id"], destino["id"], valor)
+            except storage.ContaNaoEncontrada:
+                self.enviar_json({"erro": "Não foi possível realizar este Pix."}, status=400)
+                return
+            except (storage.ErroStorage, ValueError) as erro:
+                self.enviar_json({"erro": str(erro)}, status=400)
+                return
+            self.enviar_json({
+                "ok": True, "nome": destino["nome"], "valor": self.formatar_centavos(valor),
+            })
+            return
 
         if caminho == "/api/login":
             dados = self.ler_json()
@@ -1202,6 +1350,26 @@ class Handler(BaseHTTPRequestHandler):
             self.configurar_cookie_sessao("sessao_admin", token)
             self.send_header("Location", "/admin")
             self.end_headers()
+            return
+
+        turma_id = self.id_turma_da_rota(caminho)
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/senha":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            campos = self.ler_formulario()
+            senha = (campos.get("senha") or [""])[0]
+            confirmacao = (campos.get("confirmacao") or [""])[0]
+            if senha != confirmacao:
+                self.mostrar_formulario_senha_turma(turma_id, "As senhas não conferem.", status=400)
+                return
+            try:
+                storage.redefinir_senha_turma(V2_DB, turma_id, senha)
+            except storage.ErroStorage as erro:
+                self.mostrar_formulario_senha_turma(turma_id, str(erro), status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
             return
 
         if caminho == "/admin/sair":
@@ -1449,6 +1617,10 @@ class Handler(BaseHTTPRequestHandler):
                 '<p class="aviso">Cadastros e exclusões estão indisponíveis para esta turma.</p>'
                 f'<div class="acoes">{botao_projecao}</div>'
             )
+        acoes_alunas += (
+            f'<div class="acoes"><a class="botao secundario" href="/admin/turmas/{turma_id}/senha">'
+            'Redefinir senha</a></div>'
+        )
         pagina = PAGINA_DETALHE_TURMA
         substituicoes = {
             "__ESTILO__": ESTILO_TURMAS,
@@ -1505,6 +1677,17 @@ class Handler(BaseHTTPRequestHandler):
         for marcador, conteudo in substituicoes.items():
             pagina = pagina.replace(marcador, conteudo)
         self.enviar_html(pagina)
+
+    def mostrar_formulario_senha_turma(self, turma_id, erro=None, status=200):
+        try:
+            storage.buscar_turma(V2_DB, turma_id)
+        except storage.ContaNaoEncontrada:
+            self.enviar_html("<h1>Turma não encontrada</h1>", status=404)
+            return
+        mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
+        pagina = PAGINA_SENHA_TURMA.replace("__ESTILO__", ESTILO_TURMAS)
+        pagina = pagina.replace("__ID__", str(turma_id)).replace("__ERRO__", mensagem)
+        self.enviar_html(pagina, status=status)
 
     def mostrar_formulario_aluna(self, turma_id, erro=None, campos=None, status=200):
         try:

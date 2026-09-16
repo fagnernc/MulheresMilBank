@@ -60,6 +60,10 @@ class AlunaNaoPertenceTurma(ErroStorage):
     pass
 
 
+class AutenticacaoInvalida(ErroStorage):
+    pass
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS turmas (
     id INTEGER PRIMARY KEY,
@@ -389,6 +393,46 @@ def buscar_aluna(caminho_banco, aluna_id):
     return dict(linha)
 
 
+def buscar_aluna_por_codigo(caminho_banco, codigo_conta):
+    with conexao(caminho_banco) as banco:
+        linha = banco.execute(
+            "SELECT * FROM alunas WHERE codigo_conta = ?", (codigo_conta,)
+        ).fetchone()
+    if linha is None:
+        raise ContaNaoEncontrada("Conta não encontrada.")
+    return dict(linha)
+
+
+def autenticar_aluna(caminho_banco, codigo_conta, senha, agora=None, timezone_nome=None):
+    """Autentica uma conta V2 sem revelar se conta ou senha falhou."""
+    with conexao(caminho_banco) as banco:
+        linha = banco.execute(
+            """SELECT alunas.*, turmas.inicio_em, turmas.validade_em,
+                      turmas.encerrada_em, turmas.senha AS senha_turma
+               FROM alunas JOIN turmas ON turmas.id = alunas.turma_id
+               WHERE alunas.codigo_conta = ?""",
+            (codigo_conta,),
+        ).fetchone()
+    if linha is None or not verificar_senha_turma(senha, linha["senha_turma"]):
+        raise AutenticacaoInvalida("Conta ou senha incorreta.")
+    aluna = dict(linha)
+    if status_turma(aluna, agora, timezone_nome) != "ATIVA":
+        raise TurmaInativa("Esta turma não está disponível para acesso no momento.")
+    aluna.pop("senha_turma", None)
+    return aluna
+
+
+def redefinir_senha_turma(caminho_banco, turma_id, nova_senha):
+    with conexao(caminho_banco) as banco:
+        cursor = banco.execute(
+            "UPDATE turmas SET senha = ? WHERE id = ?", (_hash_senha(nova_senha), turma_id)
+        )
+        if cursor.rowcount != 1:
+            raise ContaNaoEncontrada("Turma não encontrada.")
+        banco.commit()
+    return buscar_turma(caminho_banco, turma_id)
+
+
 def listar_alunas_turma(caminho_banco, turma_id):
     with conexao(caminho_banco) as banco:
         linhas = banco.execute(
@@ -434,6 +478,35 @@ def listar_transacoes(caminho_banco, turma_id):
             "SELECT * FROM transacoes WHERE turma_id = ? ORDER BY id", (turma_id,)
         ).fetchall()
     return [dict(linha) for linha in linhas]
+
+
+def listar_extrato_aluna(caminho_banco, aluna_id):
+    """Lista Pix enviados e recebidos, mais recente primeiro."""
+    with conexao(caminho_banco) as banco:
+        linhas = banco.execute(
+            """SELECT transacoes.*, origem.nome AS origem_nome,
+                      origem.codigo_conta AS origem_conta,
+                      destino.nome AS destino_nome,
+                      destino.codigo_conta AS destino_conta
+               FROM transacoes
+               JOIN alunas AS origem ON origem.id = transacoes.origem_aluna_id
+               JOIN alunas AS destino ON destino.id = transacoes.destino_aluna_id
+               WHERE transacoes.origem_aluna_id = ? OR transacoes.destino_aluna_id = ?
+               ORDER BY transacoes.criada_em DESC, transacoes.id DESC""",
+            (aluna_id, aluna_id),
+        ).fetchall()
+    itens = []
+    for linha in linhas:
+        transacao = dict(linha)
+        enviado = transacao["origem_aluna_id"] == aluna_id
+        itens.append({
+            "criada_em": transacao["criada_em"],
+            "tipo": "enviado" if enviado else "recebido",
+            "nome": transacao["destino_nome"] if enviado else transacao["origem_nome"],
+            "codigo_conta": transacao["destino_conta"] if enviado else transacao["origem_conta"],
+            "valor": transacao["valor"],
+        })
+    return itens
 
 
 def executar_pix(caminho_banco, turma_id, origem_aluna_id, destino_aluna_id, valor_centavos, agora=None, timezone_nome=None):

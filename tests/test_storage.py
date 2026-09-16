@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -294,6 +295,88 @@ class StorageTestCase(unittest.TestCase):
         storage.encerrar_turma(self.banco, encerrada["id"], self.agora)
         with self.assertRaises(storage.TurmaNaoAceitaAlteracoes):
             storage.excluir_aluna(self.banco, encerrada["id"], aluna_encerrada["id"], agora=self.agora)
+
+    def test_autentica_aluna_com_senha_correta_e_rejeita_credenciais_invalidas(self):
+        turma = self.criar_turma_ativa()
+        aluna = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        autenticada = storage.autenticar_aluna(
+            self.banco, aluna["codigo_conta"], "senha-da-turma", agora=self.agora
+        )
+        self.assertEqual(autenticada["id"], aluna["id"])
+        for conta, senha in ((aluna["codigo_conta"], "errada"), ("999999", "senha-da-turma")):
+            with self.subTest(conta=conta):
+                with self.assertRaises(storage.AutenticacaoInvalida):
+                    storage.autenticar_aluna(self.banco, conta, senha, agora=self.agora)
+
+    def test_login_bloqueado_em_turma_nao_ativa(self):
+        agendada = self.criar_turma_ativa(
+            inicio_em=self.agora + timedelta(hours=1), validade_em=self.agora + timedelta(hours=2)
+        )
+        aluna_agendada = storage.criar_aluna(self.banco, agendada["id"], "Ana", agora=self.agora)
+        for turma, aluna in ((agendada, aluna_agendada),):
+            with self.assertRaises(storage.TurmaInativa):
+                storage.autenticar_aluna(self.banco, aluna["codigo_conta"], "senha-da-turma", agora=self.agora)
+        ativa = self.criar_turma_ativa(nome="Ativa")
+        aluna = storage.criar_aluna(self.banco, ativa["id"], "Bia", agora=self.agora)
+        storage.alterar_validade_turma(self.banco, ativa["id"], self.agora - timedelta(seconds=1))
+        with self.assertRaises(storage.TurmaInativa):
+            storage.autenticar_aluna(self.banco, aluna["codigo_conta"], "senha-da-turma", agora=self.agora)
+        encerrada = self.criar_turma_ativa(nome="Encerrada")
+        aluna_encerrada = storage.criar_aluna(self.banco, encerrada["id"], "Cia", agora=self.agora)
+        storage.encerrar_turma(self.banco, encerrada["id"], self.agora)
+        with self.assertRaises(storage.TurmaInativa):
+            storage.autenticar_aluna(self.banco, aluna_encerrada["codigo_conta"], "senha-da-turma", agora=self.agora)
+
+    def test_extrato_da_aluna_mostra_enviado_e_recebido(self):
+        turma = self.criar_turma_ativa()
+        ana = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        bia = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        storage.executar_pix(self.banco, turma["id"], ana["id"], bia["id"], 250, self.agora)
+        enviado = storage.listar_extrato_aluna(self.banco, ana["id"])[0]
+        recebido = storage.listar_extrato_aluna(self.banco, bia["id"])[0]
+        self.assertEqual((enviado["tipo"], enviado["nome"], enviado["valor"]), ("enviado", "Bia", 250))
+        self.assertEqual((recebido["tipo"], recebido["nome"], recebido["valor"]), ("recebido", "Ana", 250))
+
+    def test_redefinir_senha_invalida_a_anterior(self):
+        turma = self.criar_turma_ativa()
+        aluna = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        storage.redefinir_senha_turma(self.banco, turma["id"], "nova-senha")
+        with self.assertRaises(storage.AutenticacaoInvalida):
+            storage.autenticar_aluna(self.banco, aluna["codigo_conta"], "senha-da-turma", agora=self.agora)
+        self.assertEqual(
+            storage.autenticar_aluna(self.banco, aluna["codigo_conta"], "nova-senha", agora=self.agora)["id"], aluna["id"]
+        )
+
+    def test_pix_concorrente_nao_gasta_acima_do_saldo(self):
+        turma = self.criar_turma_ativa(saldo_inicial_centavos=100)
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        destino_a = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        destino_b = storage.criar_aluna(self.banco, turma["id"], "Cia", agora=self.agora)
+        resultados = []
+
+        def transferir(destino):
+            try:
+                storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 80, self.agora)
+                resultados.append("ok")
+            except storage.SaldoInsuficiente:
+                resultados.append("insuficiente")
+
+        threads = [threading.Thread(target=transferir, args=(destino,)) for destino in (destino_a, destino_b)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(resultados.count("ok"), 1)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 20)
+
+    def test_pix_e_bloqueado_se_turma_encerrar_apos_login(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        storage.autenticar_aluna(self.banco, origem["codigo_conta"], "senha-da-turma", agora=self.agora)
+        storage.encerrar_turma(self.banco, turma["id"], self.agora)
+        with self.assertRaises(storage.TurmaInativa):
+            storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
 
     def test_pix_e_atomico_se_registro_da_transacao_falhar(self):
         turma = self.criar_turma_ativa()

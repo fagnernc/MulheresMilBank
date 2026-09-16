@@ -1,5 +1,6 @@
 import importlib
 import http.client
+import json
 import os
 import tempfile
 import threading
@@ -178,6 +179,32 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
                 )
                 self.assertIn(status_esperado, conteudo)
                 self.assertIn("As contas não estão disponíveis para operação.", conteudo)
+
+    def test_http_login_v2_correto_e_credenciais_invalidas(self):
+        corpo_correto = json.dumps({
+            "conta": self.aluna_projecao["codigo_conta"], "senha": "senha-da-turma",
+        })
+        self.assertEqual(self.requisicao_http("POST", "/api/v2/login", corpo_correto), (200, None))
+        for corpo in (
+            json.dumps({"conta": self.aluna_projecao["codigo_conta"], "senha": "errada"}),
+            json.dumps({"conta": "999999", "senha": "senha-da-turma"}),
+        ):
+            with self.subTest(corpo=corpo):
+                self.assertEqual(self.requisicao_http("POST", "/api/v2/login", corpo), (401, None))
+
+    def test_http_sessao_v2_invalida_e_pix_usa_origem_da_sessao(self):
+        self.assertEqual(self.requisicao_http("GET", "/api/v2/me"), (401, None))
+        destino = self.app.storage.criar_aluna(self.app.V2_DB, self.turma["id"], "Destino V2")
+        token = "sessao-v2-teste"
+        with self.app.lock:
+            self.app.sessoes_v2[token] = (self.aluna_projecao["id"], datetime.now() + self.app.SESSAO_V2_TTL)
+        resposta = self.requisicao_http(
+            "POST", "/api/v2/pix",
+            json.dumps({"conta_destino": destino["codigo_conta"], "valor": "1,00", "aluna_id": destino["id"]}),
+            {"Cookie": f"sessao_v2={token}"},
+        )
+        self.assertEqual(resposta, (200, None))
+        self.assertEqual(self.app.storage.buscar_aluna(self.app.V2_DB, self.aluna_projecao["id"])["saldo"], 99_900)
 
     def test_valor_para_centavos_aceita_formatos_previstos(self):
         for valor in ("1000", "1000,00", "1.000,00", "1000.00", "R$ 1.000,00"):
