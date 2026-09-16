@@ -1,0 +1,171 @@
+import sqlite3
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import storage
+
+
+FUSO = ZoneInfo("America/Maceio")
+
+
+class StorageTestCase(unittest.TestCase):
+    def setUp(self):
+        self.temporario = tempfile.TemporaryDirectory()
+        self.banco = Path(self.temporario.name) / "mulheresmilbank.db"
+        storage.inicializar_banco(self.banco)
+        self.agora = datetime(2026, 9, 15, 10, 0, tzinfo=FUSO)
+
+    def tearDown(self):
+        self.temporario.cleanup()
+
+    def criar_turma_ativa(self, **campos):
+        parametros = {
+            "nome": "Turma de teste",
+            "inicio_em": self.agora - timedelta(hours=1),
+            "validade_em": self.agora + timedelta(hours=1),
+            "saldo_inicial_centavos": 100_000,
+            "senha": "senha-da-turma",
+        }
+        parametros.update(campos)
+        return storage.criar_turma(self.banco, **parametros)
+
+    def test_cria_banco_e_tabelas(self):
+        self.assertTrue(self.banco.exists())
+        with storage.conexao(self.banco) as banco:
+            tabelas = {
+                linha["name"]
+                for linha in banco.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+        self.assertTrue({"turmas", "alunas", "transacoes"}.issubset(tabelas))
+
+    def test_cria_turma_com_senha_hash(self):
+        turma = self.criar_turma_ativa()
+        self.assertEqual(turma["nome"], "Turma de teste")
+        self.assertNotEqual(turma["senha"], "senha-da-turma")
+        self.assertNotIn("senha-da-turma", turma["senha"])
+        self.assertTrue(storage.verificar_senha_turma("senha-da-turma", turma["senha"]))
+        self.assertFalse(storage.verificar_senha_turma("senha-incorreta", turma["senha"]))
+
+    def test_status_agendada(self):
+        turma = self.criar_turma_ativa(inicio_em=self.agora + timedelta(hours=1), validade_em=self.agora + timedelta(hours=2))
+        self.assertEqual(storage.status_turma(turma, self.agora), "AGENDADA")
+
+    def test_status_ativa(self):
+        turma = self.criar_turma_ativa()
+        self.assertEqual(storage.status_turma(turma, self.agora), "ATIVA")
+
+    def test_status_e_ativo_exatamente_no_inicio(self):
+        inicio = self.agora + timedelta(hours=1)
+        turma = self.criar_turma_ativa(inicio_em=inicio, validade_em=inicio + timedelta(hours=1))
+        self.assertEqual(storage.status_turma(turma, inicio), "ATIVA")
+
+    def test_status_e_ativo_exatamente_na_validade(self):
+        validade = self.agora + timedelta(hours=1)
+        turma = self.criar_turma_ativa(inicio_em=self.agora, validade_em=validade)
+        self.assertEqual(storage.status_turma(turma, validade), "ATIVA")
+
+    def test_status_expira_imediatamente_apos_validade(self):
+        validade = self.agora + timedelta(hours=1)
+        turma = self.criar_turma_ativa(inicio_em=self.agora, validade_em=validade)
+        self.assertEqual(storage.status_turma(turma, validade + timedelta(microseconds=1)), "EXPIRADA")
+
+    def test_status_expirada(self):
+        turma = self.criar_turma_ativa(inicio_em=self.agora - timedelta(hours=2), validade_em=self.agora - timedelta(seconds=1))
+        self.assertEqual(storage.status_turma(turma, self.agora), "EXPIRADA")
+
+    def test_status_encerrada(self):
+        turma = self.criar_turma_ativa()
+        encerrada = storage.encerrar_turma(self.banco, turma["id"], self.agora)
+        self.assertEqual(storage.status_turma(encerrada, self.agora), "ENCERRADA")
+
+    def test_cria_aluna_com_saldo_inicial(self):
+        turma = self.criar_turma_ativa(saldo_inicial_centavos=12_345)
+        aluna = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        self.assertEqual(aluna["turma_id"], turma["id"])
+        self.assertEqual(aluna["saldo"], 12_345)
+
+    def test_codigos_tem_seis_digitos_e_nao_duplicam(self):
+        turma = self.criar_turma_ativa()
+        codigos = {
+            storage.criar_aluna(self.banco, turma["id"], f"Aluna {numero}")["codigo_conta"]
+            for numero in range(30)
+        }
+        self.assertEqual(len(codigos), 30)
+        self.assertTrue(all(len(codigo) == 6 and codigo.isdigit() and codigo[0] != "0" for codigo in codigos))
+
+    def test_codigo_manual_duplicado_e_rejeitado_globalmente(self):
+        primeira = self.criar_turma_ativa(nome="Primeira")
+        segunda = self.criar_turma_ativa(nome="Segunda")
+        storage.criar_aluna(self.banco, primeira["id"], "Ana", "123456")
+        with self.assertRaises(storage.CodigoContaInvalido):
+            storage.criar_aluna(self.banco, segunda["id"], "Bia", "123456")
+
+    def test_pix_na_mesma_turma_debita_credia_e_registra(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 2_500, self.agora)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 97_500)
+        self.assertEqual(storage.buscar_aluna(self.banco, destino["id"])["saldo"], 102_500)
+        transacoes = storage.listar_transacoes(self.banco, turma["id"])
+        self.assertEqual(len(transacoes), 1)
+        self.assertEqual(transacoes[0]["valor"], 2_500)
+
+    def test_pix_rejeita_saldo_insuficiente_sem_alterar_saldos(self):
+        turma = self.criar_turma_ativa(saldo_inicial_centavos=100)
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        with self.assertRaises(storage.SaldoInsuficiente):
+            storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 101, self.agora)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 100)
+        self.assertEqual(storage.buscar_aluna(self.banco, destino["id"])["saldo"], 100)
+
+    def test_pix_rejeita_turmas_diferentes(self):
+        primeira = self.criar_turma_ativa(nome="Primeira")
+        segunda = self.criar_turma_ativa(nome="Segunda")
+        origem = storage.criar_aluna(self.banco, primeira["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, segunda["id"], "Bia")
+        with self.assertRaises(storage.TurmasDiferentes):
+            storage.executar_pix(self.banco, primeira["id"], origem["id"], destino["id"], 100, self.agora)
+
+    def test_pix_rejeita_turma_expirada(self):
+        turma = self.criar_turma_ativa(validade_em=self.agora - timedelta(seconds=1))
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        with self.assertRaises(storage.TurmaInativa):
+            storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
+
+    def test_pix_rejeita_turma_encerrada_sem_alterar_dados(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        storage.encerrar_turma(self.banco, turma["id"], self.agora)
+        with self.assertRaises(storage.TurmaInativa):
+            storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 100_000)
+        self.assertEqual(storage.buscar_aluna(self.banco, destino["id"])["saldo"], 100_000)
+        self.assertEqual(storage.listar_transacoes(self.banco, turma["id"]), [])
+
+    def test_pix_e_atomico_se_registro_da_transacao_falhar(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        with storage.conexao(self.banco) as banco:
+            banco.execute(
+                """CREATE TRIGGER falhar_antes_da_transacao
+                   BEFORE INSERT ON transacoes
+                   BEGIN SELECT RAISE(ABORT, 'falha simulada'); END"""
+            )
+            banco.commit()
+        with self.assertRaises(sqlite3.IntegrityError):
+            storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 100_000)
+        self.assertEqual(storage.buscar_aluna(self.banco, destino["id"])["saldo"], 100_000)
+        self.assertEqual(storage.listar_transacoes(self.banco, turma["id"]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
