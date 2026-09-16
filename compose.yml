@@ -11,6 +11,7 @@ services:
       SENHA_PADRAO: ${SENHA_PADRAO:?Defina SENHA_PADRAO no arquivo .env}
       COOKIE_SECURE: ${COOKIE_SECURE:?Defina COOKIE_SECURE no arquivo .env}
       DOMINIO: ${DOMINIO:-}
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Maceio}
 
     volumes:
       - ./data:/data

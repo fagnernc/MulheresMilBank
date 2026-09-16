@@ -995,6 +995,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         caminho = urlparse(self.path).path
 
+        if caminho == "/health":
+            self.enviar_json({"ok": True})
+            return
+
         if caminho == "/assets/logo.png":
             caminho_logo = os.path.join(BASE_DIR, "assets", "logo.png")
             try:

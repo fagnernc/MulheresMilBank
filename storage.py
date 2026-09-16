@@ -139,9 +139,11 @@ def _de_iso(valor, timezone_nome=None):
 
 @contextmanager
 def conexao(caminho_banco):
-    banco = sqlite3.connect(str(caminho_banco))
+    banco = sqlite3.connect(str(caminho_banco), timeout=5)
     banco.row_factory = sqlite3.Row
     banco.execute("PRAGMA foreign_keys = ON")
+    banco.execute("PRAGMA busy_timeout = 5000")
+    banco.execute("PRAGMA journal_mode = WAL")
     try:
         yield banco
     finally:

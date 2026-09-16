@@ -86,6 +86,11 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
 
         self.assertEqual(destinos, ["/admin/login"])
 
+    def test_http_health_responde_sem_expor_dados(self):
+        status, destino, conteudo = self.requisicao_http("GET", "/health", com_corpo=True)
+        self.assertEqual((status, destino), (200, None))
+        self.assertEqual(json.loads(conteudo), {"ok": True})
+
     def test_http_listagem_de_turmas_redireciona_sem_sessao(self):
         self.assertEqual(self.requisicao_http("GET", "/admin/turmas"), (303, "/admin/login"))
 
