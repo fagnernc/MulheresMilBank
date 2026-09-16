@@ -54,6 +54,7 @@ PORTA = int(os.environ.get("PORTA", "8000"))
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
+DOMINIO = os.environ.get("DOMINIO", "").strip()
 SESSAO_ADMIN_TTL = timedelta(hours=4)
 V2_DB = storage.caminho_padrao_banco(DATA_DIR)
 V2_INICIALIZADA = False
@@ -782,6 +783,27 @@ PAGINA_LOTE_ALUNAS = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="U
 </main></body></html>"""
 
 
+PAGINA_PROJECAO = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Contas da turma - Mulheres Mil Bank</title>
+<style>
+  :root { --roxo:#5B2C82; --laranja:#F2A93E; --creme:#FAF6EF; --texto:#1F2A28; --aviso:#8E3026; }
+  * { box-sizing:border-box; } body { margin:0; background:var(--creme); color:var(--texto); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+  main { max-width:1600px; margin:0 auto; min-height:100vh; padding:clamp(20px,3vw,52px); display:flex; flex-direction:column; }
+  header { text-align:center; border-bottom:4px solid var(--laranja); padding:0 0 clamp(18px,2vw,30px); } .marca { color:var(--roxo); font-size:clamp(20px,2.2vw,34px); font-weight:800; letter-spacing:.08em; }
+  h1 { margin:10px 0 12px; color:var(--roxo); font-size:clamp(28px,4vw,58px); line-height:1.1; } .status { display:inline-block; border-radius:999px; padding:6px 12px; font-size:clamp(13px,1.5vw,20px); font-weight:800; background:#E8DFEF; color:var(--roxo); }
+  .ATIVA { background:#DDF3E5; color:#17643A; } .EXPIRADA,.ENCERRADA { background:#FBEAE7; color:var(--aviso); } .validade { margin:12px 0 0; font-size:clamp(16px,1.8vw,25px); } .aviso { margin:12px auto 0; max-width:700px; color:var(--aviso); font-weight:700; font-size:clamp(15px,1.7vw,22px); }
+  .contas { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:clamp(14px,2vw,28px); padding:clamp(26px,4vw,58px) 0; flex:1; align-content:start; }
+  .conta { background:#fff; border:1px solid #E8DFEF; border-radius:16px; min-height:150px; padding:clamp(18px,2vw,30px); display:flex; flex-direction:column; justify-content:center; box-shadow:0 3px 10px rgba(31,42,40,.08); text-align:center; }
+  .nome { font-weight:800; font-size:clamp(16px,1.8vw,27px); line-height:1.2; } .codigo { color:var(--roxo); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:clamp(30px,4vw,62px); font-weight:800; letter-spacing:.06em; margin-top:10px; white-space:nowrap; }
+  footer { border-top:2px solid #E8DFEF; padding-top:18px; text-align:center; font-size:clamp(16px,1.8vw,26px); } .endereco { color:var(--roxo); font-weight:800; word-break:break-word; } .tela-cheia { position:fixed; right:20px; bottom:20px; border:0; border-radius:999px; padding:12px 18px; background:var(--roxo); color:#fff; font:inherit; font-weight:800; cursor:pointer; } :fullscreen .tela-cheia { opacity:.18; } :fullscreen .tela-cheia:hover { opacity:1; }
+  @media (max-width:1000px) { .contas { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:600px) { .contas { grid-template-columns:1fr; } main { padding:20px 14px 80px; } }
+  @media print { .tela-cheia { display:none; } main { max-width:none; padding:12mm; } .contas { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8mm; } .conta { box-shadow:none; break-inside:avoid; } }
+</style></head><body><main>
+<header><div class="marca">MULHERES MIL BANK</div><h1>__NOME_TURMA__</h1><span class="status __STATUS__">__STATUS__</span><p class="validade">Disponível até __VALIDADE__</p>__AVISO__</header>
+<section class="contas" aria-label="Contas das participantes">__CONTAS__</section>
+<footer>Acesse:<br><span class="endereco">__ENDERECO__</span></footer>
+</main><button class="tela-cheia" type="button" onclick="document.documentElement.requestFullscreen && document.documentElement.requestFullscreen()">Tela cheia</button></body></html>"""
+
+
 # ---------------------------------------------------------------------------
 # Servidor
 # ---------------------------------------------------------------------------
@@ -922,6 +944,12 @@ class Handler(BaseHTTPRequestHandler):
             return int(partes[2]), int(partes[4])
         return None
 
+    def endereco_acesso(self):
+        if DOMINIO:
+            return f"https://{DOMINIO}"
+        host = self.headers.get("Host", "").strip()
+        return f"http://{host or 'localhost'}"
+
     # -- rotas ------------------------------------------------------------
 
     def do_GET(self):
@@ -1001,6 +1029,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self.exigir_v2_disponivel():
                 return
             self.mostrar_formulario_lote(turma_id)
+            return
+
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/projetar":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_projecao(turma_id)
             return
 
         if caminho == "/api/me":
@@ -1395,15 +1431,24 @@ class Handler(BaseHTTPRequestHandler):
             )
         else:
             lista_alunas = '<p class="aviso">Nenhuma aluna cadastrada nesta turma.</p>'
+        botao_projecao = ""
+        if alunas:
+            botao_projecao = (
+                f'<a class="botao secundario" href="/admin/turmas/{turma_id}/projetar">'
+                'Projetar contas</a>'
+            )
         if pode_alterar_alunas:
             acoes_alunas = (
                 f'<div class="acoes"><a class="botao" href="/admin/turmas/{turma_id}/alunas/nova">'
                 '+ Adicionar aluna</a>'
                 f'<a class="botao secundario" href="/admin/turmas/{turma_id}/alunas/lote">'
-                'Adicionar em lote</a></div>'
+                f'Adicionar em lote</a>{botao_projecao}</div>'
             )
         else:
-            acoes_alunas = '<p class="aviso">Cadastros e exclusões estão indisponíveis para esta turma.</p>'
+            acoes_alunas = (
+                '<p class="aviso">Cadastros e exclusões estão indisponíveis para esta turma.</p>'
+                f'<div class="acoes">{botao_projecao}</div>'
+            )
         pagina = PAGINA_DETALHE_TURMA
         substituicoes = {
             "__ESTILO__": ESTILO_TURMAS,
@@ -1425,6 +1470,41 @@ class Handler(BaseHTTPRequestHandler):
         for marcador, conteudo in substituicoes.items():
             pagina = pagina.replace(marcador, conteudo)
         self.enviar_html(pagina, status=status)
+
+    def mostrar_projecao(self, turma_id):
+        try:
+            turma = storage.buscar_turma(V2_DB, turma_id)
+        except storage.ContaNaoEncontrada:
+            self.enviar_html("<h1>Turma não encontrada</h1>", status=404)
+            return
+        status_turma = storage.status_turma(turma)
+        alunas = storage.listar_alunas_turma(V2_DB, turma_id)
+        contas = ""
+        for aluna in alunas:
+            codigo = aluna["codigo_conta"]
+            contas += (
+                '<article class="conta">'
+                f'<div class="nome">{html.escape(aluna["nome"])}</div>'
+                f'<div class="codigo">{codigo[:3]} {codigo[3:]}</div>'
+                '</article>'
+            )
+        if not contas:
+            contas = '<p class="aviso">Nenhuma conta cadastrada nesta turma.</p>'
+        aviso = ""
+        if status_turma in ("EXPIRADA", "ENCERRADA"):
+            aviso = '<p class="aviso">As contas não estão disponíveis para operação.</p>'
+        pagina = PAGINA_PROJECAO
+        substituicoes = {
+            "__NOME_TURMA__": html.escape(turma["nome"]),
+            "__STATUS__": status_turma,
+            "__VALIDADE__": self.formatar_data_hora(turma["validade_em"]),
+            "__AVISO__": aviso,
+            "__CONTAS__": contas,
+            "__ENDERECO__": html.escape(self.endereco_acesso()),
+        }
+        for marcador, conteudo in substituicoes.items():
+            pagina = pagina.replace(marcador, conteudo)
+        self.enviar_html(pagina)
 
     def mostrar_formulario_aluna(self, turma_id, erro=None, campos=None, status=200):
         try:

@@ -3,6 +3,7 @@ FROM python:3.13-slim
 WORKDIR /app
 
 COPY app.py .
+COPY storage.py .
 COPY assets ./assets
 
 ENV PYTHONUNBUFFERED=1
