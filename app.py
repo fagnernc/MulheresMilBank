@@ -813,6 +813,32 @@ PAGINA_SENHA_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="U
 
 PAGINA_V2 = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mulheres Mil Bank</title><style>:root{--r:#5B2C82;--c:#FAF6EF;--e:#B23A2E;--s:#17643A}*{box-sizing:border-box}body{margin:0;background:var(--c);font-family:-apple-system,Arial,sans-serif;color:#1F2A28}.app{max-width:520px;margin:auto;min-height:100vh;padding:20px}.marca{text-align:center;color:var(--r);font-weight:800;letter-spacing:.08em}.card{background:#fff;border-radius:14px;padding:20px;margin:16px 0;box-shadow:0 3px 12px #0001}h1{color:var(--r);font-size:22px}label{display:block;margin:12px 0 5px;font-weight:700}input{width:100%;padding:12px;border:1px solid #ddd;border-radius:9px;font:inherit}button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:9px;background:var(--r);color:#fff;font-weight:800;font:inherit}.acoes{display:flex;gap:8px}.acoes button{font-size:13px}.saldo{font-size:30px;font-weight:800;color:var(--r)}.erro{color:var(--e);font-weight:700}.item{padding:12px 0;border-bottom:1px solid #eee}.mais{color:var(--s);font-weight:800}.menos{color:var(--e);font-weight:800}.oculto{display:none}</style></head><body><main class="app"><div class="marca">MULHERES MIL BANK</div><div id="app"></div></main><script>const q=s=>document.querySelector(s),e=s=>String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));let eu;async function api(p,o={}){let r=await fetch(p,{method:o.method||'GET',headers:{'Content-Type':'application/json'},body:o.body?JSON.stringify(o.body):undefined,credentials:'same-origin'}),d=await r.json();if(!r.ok)throw Error(d.erro||'Não foi possível concluir.');return d}function login(m=''){q('#app').innerHTML=`<div class="card"><h1>Entrar na atividade</h1><p>Use sua conta de seis dígitos e a senha informada pelo professor.</p><label>Conta</label><input id="conta" inputmode="numeric"><label>Senha</label><input id="senha" type="password"><button id="entrar">Entrar</button><p class="erro">${e(m)}</p></div>`;q('#entrar').onclick=async()=>{try{await api('/api/v2/login',{method:'POST',body:{conta:q('#conta').value.trim(),senha:q('#senha').value}});inicio()}catch(x){login(x.message)}}}async function inicio(){try{eu=await api('/api/v2/me')}catch(x){return login(x.message)}q('#app').innerHTML=`<div class="card"><h1>Olá, ${e(eu.nome)}</h1><p>Agência 001 · Conta ${e(eu.conta)}</p><p>Saldo fictício</p><div class="saldo">${e(eu.saldo)}</div></div><div class="acoes"><button id="pix">Fazer Pix</button><button id="extrato">Extrato</button><button id="sair">Sair</button></div>`;q('#pix').onclick=pix;q('#extrato').onclick=extrato;q('#sair').onclick=async()=>{await api('/api/v2/sair',{method:'POST'});login()}}function pix(m=''){q('#app').innerHTML=`<div class="card"><h1>Fazer Pix</h1><label>Conta de destino</label><input id="destino" inputmode="numeric"><label>Valor (R$)</label><input id="valor" inputmode="decimal"><button id="enviar">Confirmar Pix</button><button id="voltar">Voltar</button><p class="erro">${e(m)}</p></div>`;q('#voltar').onclick=inicio;q('#enviar').onclick=async()=>{if(!confirm('Confirmar este Pix?'))return;try{let r=await api('/api/v2/pix',{method:'POST',body:{conta_destino:q('#destino').value.trim(),valor:q('#valor').value.trim()}});q('#app').innerHTML=`<div class="card"><h1>Pix enviado</h1><p>${e(r.valor)} para ${e(r.nome)}.</p><button id="ok">Voltar</button></div>`;q('#ok').onclick=inicio}catch(x){pix(x.message)}}}async function extrato(){try{let itens=await api('/api/v2/extrato');q('#app').innerHTML=`<div class="card"><h1>Extrato</h1>${itens.map(i=>`<div class="item"><b>${i.tipo==='enviado'?'Pix enviado para':'Pix recebido de'} ${e(i.nome)}</b><br>Conta ${e(i.conta)} · ${e(i.quando)}<span class="${i.tipo==='enviado'?'menos':'mais'}"> ${i.sinal} ${e(i.valor)}</span></div>`).join('')||'<p>Nenhuma movimentação.</p>'}<button id="voltar">Voltar</button></div>`;q('#voltar').onclick=inicio}catch(x){login(x.message)}}(async()=>{try{await api('/api/v2/me');inicio()}catch(x){login()}})()</script></body></html>"""
 
+# A camada V2 reaproveita a linguagem visual da V1 sem duplicar sua lógica.
+PAGINA_V2 = PAGINA_V2.replace("</head>", """<style>
+  :root { --r:#5B2C82; --rc:#7A45A8; --l:#F2A93E; --c:#FAF6EF; --linha:#E8DFEF; }
+  body { background:var(--c); } .app { max-width:460px; padding:0 0 36px; background:var(--c); }
+  .marca { min-height:142px; padding:28px 20px 20px; color:#fff; background:var(--r); border-bottom:4px solid var(--l); font-size:22px; letter-spacing:.04em; box-shadow:0 2px 8px #0002; }
+  .marca::after { content:'Simulação educativa para praticar Pix com segurança'; display:block; margin-top:12px; font-size:12px; font-weight:500; letter-spacing:0; opacity:.9; }
+  #app { padding:0 16px; } .card { margin:-22px 0 16px; padding:20px; border-radius:14px; box-shadow:0 6px 18px rgba(11,79,74,.10); }
+  h1 { font-size:18px; margin-top:0; } p { line-height:1.45; } label { color:var(--r); font-size:13px; }
+  input { border:1.5px solid var(--linha); border-radius:10px; } input:focus { outline:2px solid var(--rc); border-color:var(--rc); }
+  button { border-radius:10px; background:var(--r); } button:active { background:var(--rc); }
+  .acoes { margin:0 0 16px; } .acoes button { border:1.5px solid var(--linha); background:#fff; color:var(--r); border-radius:12px; }
+  .saldo { margin-top:6px; padding:14px; border-radius:12px; color:#fff; background:var(--r); font-size:30px; }
+  .erro { min-height:0; background:#FBEAE7; border-radius:8px; padding:8px 10px; } .erro:empty { display:none; }
+  .item { font-size:14px; } .mais,.menos { display:block; margin-top:5px; }
+</style></head>""")
+PAGINA_V2 = PAGINA_V2.replace("</body>", """<script>
+  const pixComMensagemSegura = pix;
+  pix = function (mensagem = '') {
+    return pixComMensagemSegura(typeof mensagem === 'string' ? mensagem : '');
+  };
+  new MutationObserver(() => {
+    const botao = document.querySelector('#pix');
+    if (botao) botao.onclick = () => pix();
+  }).observe(document.querySelector('#app'), {childList:true, subtree:true});
+</script></body>""")
+
 
 # ---------------------------------------------------------------------------
 # Servidor
