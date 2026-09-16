@@ -9,9 +9,22 @@ services:
       PORTA: 8000
       CODIGO_ADMIN: ${CODIGO_ADMIN:?Defina CODIGO_ADMIN no arquivo .env}
       SENHA_PADRAO: ${SENHA_PADRAO:?Defina SENHA_PADRAO no arquivo .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:?Defina COOKIE_SECURE no arquivo .env}
 
     volumes:
       - ./data:/data
 
-    ports:
-      - "8000:8000"
+    networks:
+      - traefik-public
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mulheresmilbank.rule=Host(`${DOMINIO:?Defina DOMINIO no arquivo .env}`)"
+      - "traefik.http.routers.mulheresmilbank.entrypoints=websecure"
+      - "traefik.http.routers.mulheresmilbank.tls=true"
+      - "traefik.http.services.mulheresmilbank.loadbalancer.server.port=8000"
+
+networks:
+  traefik-public:
+    external: true

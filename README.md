@@ -63,7 +63,7 @@ Não use senhas bancárias, senhas pessoais ou credenciais reais.
 
 Requisitos: Docker com Docker Compose.
 
-O Compose usa `.env` para receber as credenciais da simulação e mantém os arquivos de atividade em `data/`, montado no contêiner como `/data`.
+O Compose usa `.env` para receber as credenciais da simulação e mantém os arquivos de atividade em `data/`, montado no contêiner como `/data`. Para publicação no VPS, ele se integra ao Traefik pela rede Docker externa `traefik-public`.
 
 ```bash
 cp .env.example .env
@@ -75,9 +75,13 @@ docker compose up --build
 Antes de iniciar, edite `.env` e substitua os valores de exemplo por valores próprios para:
 
 - `CODIGO_ADMIN`: código usado pelo professor para entrar no painel administrativo;
-- `SENHA_PADRAO`: senha fictícia usada pelas participantes na atividade.
+- `SENHA_PADRAO`: senha fictícia usada pelas participantes na atividade;
+- `DOMINIO`: domínio que o router do Traefik utilizará para o acesso HTTPS;
+- `COOKIE_SECURE`: use `true` quando a aplicação estiver publicada por HTTPS no VPS.
 
-`PORTA` também está disponível no `.env.example`; a configuração atual do Compose publica temporariamente `8000:8000` para testes locais. O simulador ficará disponível em `http://localhost:8000` no computador que executa o Docker. Para encerrar, use `Ctrl+C`.
+Antes de iniciar no VPS, confirme que a rede externa `traefik-public` já existe. No modo Traefik, a porta interna `8000` não é publicada diretamente no host: o acesso ocorre pelo domínio configurado e pelo Traefik em HTTPS. Para encerrar, use `Ctrl+C`.
+
+Para testes locais por HTTP, defina `COOKIE_SECURE=false`. Quando a aplicação estiver atrás de HTTPS, defina `COOKIE_SECURE=true`, como no exemplo destinado ao VPS.
 
 ## Painel do professor
 

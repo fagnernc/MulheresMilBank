@@ -46,6 +46,9 @@ CODIGO_ADMIN = os.environ.get("CODIGO_ADMIN", "professor")
 AGENCIA = "001"
 SENHA_PADRAO = os.environ.get("SENHA_PADRAO", "123")
 PORTA = int(os.environ.get("PORTA", "8000"))
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 SESSAO_ADMIN_TTL = timedelta(hours=4)
 
 
@@ -712,6 +715,8 @@ class Handler(BaseHTTPRequestHandler):
         jar[nome]["path"] = "/"
         jar[nome]["httponly"] = True
         jar[nome]["samesite"] = "Lax"
+        if COOKIE_SECURE:
+            jar[nome]["secure"] = True
         if expirar:
             jar[nome]["max-age"] = 0
         self.send_header("Set-Cookie", jar[nome].OutputString())
