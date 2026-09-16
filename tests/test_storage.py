@@ -411,6 +411,25 @@ class StorageTestCase(unittest.TestCase):
             {"participantes": 1, "fizeram_pix": 0, "transacoes": 0, "movimentado": 0},
         )
 
+    def test_descricao_do_pix_aparece_no_extrato(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        storage.executar_pix(
+            self.banco, turma["id"], origem["id"], destino["id"], 100,
+            agora=self.agora, descricao="Material da oficina",
+        )
+        self.assertEqual(storage.listar_extrato_aluna(self.banco, origem["id"])[0]["descricao"], "Material da oficina")
+
+    def test_migracao_adiciona_descricao_a_banco_existente(self):
+        banco_antigo = Path(self.temporario.name) / "antigo.db"
+        with sqlite3.connect(banco_antigo) as banco:
+            banco.executescript(storage.SCHEMA.replace("descricao TEXT NOT NULL DEFAULT '',\n    criada_em", "criada_em"))
+        storage.inicializar_banco(banco_antigo)
+        with storage.conexao(banco_antigo) as banco:
+            colunas = {linha["name"] for linha in banco.execute("PRAGMA table_info(transacoes)")}
+        self.assertIn("descricao", colunas)
+
     def test_pix_e_atomico_se_registro_da_transacao_falhar(self):
         turma = self.criar_turma_ativa()
         origem = storage.criar_aluna(self.banco, turma["id"], "Ana")

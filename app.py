@@ -839,6 +839,19 @@ PAGINA_V2 = PAGINA_V2.replace("</body>", """<script>
   }).observe(document.querySelector('#app'), {childList:true, subtree:true});
 </script></body>""")
 
+PAGINA_V2_RENOVADA = r'''<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><title>Mulheres Mil Bank</title><style>
+:root{--roxo:#5B2C82;--roxo-claro:#7A45A8;--laranja:#F2A93E;--creme:#FAF6EF;--linha:#E8DFEF;--texto:#2A1F35;--erro:#B23A2E;--sucesso:#1F7A4D}*{box-sizing:border-box}body{margin:0;background:var(--creme);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:var(--texto)}.faixa{background:repeating-linear-gradient(45deg,var(--erro),var(--erro) 12px,#8f2c22 12px,#8f2c22 24px);color:#fff;text-align:center;font-size:12px;font-weight:800;letter-spacing:.04em;padding:7px 10px}.app{max-width:460px;margin:auto;min-height:100vh}.topo{background:var(--roxo);color:#fff;padding:24px 20px;border-bottom:4px solid var(--laranja);text-align:center}.topo.conta{text-align:left;padding:15px 20px}.logo{background:#fff;border-radius:12px;padding:10px 15px 6px;display:inline-block;box-shadow:0 4px 12px #0002}.logo img{display:block;width:210px;max-width:100%;height:auto}.mini{width:108px}.sub{font-size:12.5px;opacity:.9;margin-top:10px}.nome{font-size:15px;font-weight:800;margin-top:12px}.card{background:#fff;margin:-16px 16px 0;border-radius:14px;box-shadow:0 6px 18px rgba(11,79,74,.1);padding:20px}.tela{padding:18px 20px 12px}h1{font-size:18px;color:var(--roxo);margin:0 0 6px}p{line-height:1.45}.legenda{font-size:13px;color:#5B6E6A}.rotulo{display:block;font-size:12.5px;color:var(--roxo);font-weight:800;margin:14px 0 6px}input{width:100%;padding:13px 14px;border:1.5px solid var(--linha);border-radius:10px;font:inherit;color:var(--texto)}input:focus{outline:2px solid var(--roxo-claro);border-color:var(--roxo-claro)}button{width:100%;margin-top:12px;padding:14px;border:0;border-radius:10px;background:var(--roxo);color:#fff;font:inherit;font-weight:800;cursor:pointer}.secundario{background:#fff;color:var(--roxo);border:1.5px solid var(--roxo)}.erro{background:#FBEAE7;color:var(--erro);border:1px solid #F1C6BE;padding:10px 12px;border-radius:8px;font-size:13px}.erro:empty{display:none}.saldo{margin:18px 20px 0;background:var(--roxo);color:#fff;border-radius:14px;padding:20px}.saldo .valor{font-size:30px;font-weight:800}.saldo .chave{font-size:12px;opacity:.9;margin-top:10px}.acoes{display:flex;gap:10px;margin:18px 20px 4px}.acoes button{flex:1;padding:14px 7px;margin:0;background:#fff;color:var(--roxo);border:1.5px solid var(--linha);font-size:13px}.alerta{background:#FFF6E4;border:1px solid #EAD59B;color:#6B4F12;border-radius:10px;padding:12px 14px;font-size:12.8px;margin:16px 20px;line-height:1.45}.alerta b{display:block;margin-bottom:4px}.conferencia{background:#F1EEE4;border-radius:12px;padding:15px}.linha{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed var(--linha);font-size:13px}.linha:last-child{border:0}.linha b{text-align:right;color:var(--roxo)}.voltar{width:auto;margin:0 0 12px;padding:0;background:none;border:0;color:var(--roxo);text-align:left}.lista{margin:8px 20px}.item{display:flex;justify-content:space-between;gap:10px;padding:12px 4px;border-bottom:1px solid var(--linha);font-size:13px}.quando{font-size:11px;color:#7A8A86}.mais{color:var(--sucesso);font-weight:800}.menos{color:var(--erro);font-weight:800}.rodape{text-align:center;font-size:11px;color:#8A9A96;margin:25px 20px}.oculto{display:none!important}
+</style></head><body><div class="faixa">SIMULAÇÃO EDUCATIVA — NÃO É UM BANCO REAL</div><main class="app" id="app"></main><script>
+const q=s=>document.querySelector(s);let eu=null,rascunho={};const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const logo='/assets/logo.png';function topo(sub=''){return `<header class="topo conta"><div class="logo"><img class="mini" src="${logo}" alt="Mulheres Mil Bank"></div><div class="nome">${eu?esc(eu.nome):''}</div><div class="sub">${sub}</div></header>`}async function api(url,opt={}){const r=await fetch(url,{method:opt.method||'GET',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined,credentials:'same-origin'});const d=await r.json();if(!r.ok)throw Error(d.erro||'Não foi possível concluir esta ação.');return d}function rodape(){return '<p class="rodape">Nenhum dinheiro real é usado aqui. Contas e valores são fictícios, para praticar Pix com segurança.</p>'}
+function login(msg=''){q('#app').innerHTML=`<header class="topo"><div class="logo"><img src="${logo}" alt="Mulheres Mil Bank"></div><div class="sub">Ambiente de simulação da oficina de Pix</div></header><section class="card"><div class="tela"><h1>Entrar na atividade</h1><p class="legenda">Use a conta de seis dígitos entregue pelo professor e a senha da turma.</p><label class="rotulo">Conta</label><input id="conta" inputmode="numeric" autocomplete="off"><label class="rotulo">Senha</label><input id="senha" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><p class="erro">${esc(msg)}</p></div></section><div class="alerta"><b>Esta é uma simulação</b>Não é um banco real e não utiliza dinheiro real. A atividade é exclusivamente educacional.</div>${rodape()}`;q('#entrar').onclick=async()=>{try{await api('/api/v2/login',{method:'POST',body:{conta:q('#conta').value.trim(),senha:q('#senha').value}});inicio()}catch(e){login(e.message)}};q('#senha').onkeydown=e=>{if(e.key==='Enter')q('#entrar').click()}}
+async function inicio(){try{eu=await api('/api/v2/me')}catch(e){return login(e.message)}q('#app').innerHTML=`${topo('Minha conta')}<section class="saldo"><div>Saldo disponível (fictício)</div><div class="valor">${esc(eu.saldo)}</div><div class="chave">Agência 001 · Conta ${esc(eu.conta)} — esse número também é sua chave Pix</div></section><div class="acoes"><button id="pix">Fazer Pix</button><button id="extrato">Ver extrato</button><button id="sair">Sair</button></div><div class="alerta"><b>Lembrete de segurança</b>Antes de qualquer Pix de verdade: confira o nome de quem recebe, nunca tenha pressa e nunca compartilhe seu código ou senha.</div>${rodape()}`;q('#pix').onclick=()=>dadosPix();q('#extrato').onclick=()=>extrato();q('#sair').onclick=async()=>{await api('/api/v2/sair',{method:'POST'});login()}}
+function dadosPix(msg=''){q('#app').innerHTML=`${topo('Novo Pix')}<section class="card"><div class="tela"><button class="voltar" id="voltar">← Voltar</button><h1>Para quem você vai enviar?</h1><p class="legenda">Digite a conta da colega, o valor e uma descrição. Você conferirá os dados antes de enviar.</p><label class="rotulo">Conta da destinatária</label><input id="destino" inputmode="numeric" value="${esc(rascunho.conta||'')}"><label class="rotulo">Valor (R$)</label><input id="valor" inputmode="decimal" value="${esc(rascunho.valor||'')}"><label class="rotulo">Descrição (opcional)</label><input id="descricao" value="${esc(rascunho.descricao||'')}"><button id="avancar">Avançar</button><p class="erro">${esc(msg)}</p></div></section>${rodape()}`;q('#voltar').onclick=()=>inicio();q('#avancar').onclick=async()=>{rascunho={conta:q('#destino').value.trim(),valor:q('#valor').value.trim(),descricao:q('#descricao').value.trim()};if(!rascunho.conta||!rascunho.valor)return dadosPix('Informe a conta e o valor.');try{const d=await api('/api/v2/destinataria?conta='+encodeURIComponent(rascunho.conta));conferencia(d)}catch(e){dadosPix(e.message)}}}
+function conferencia(destino,msg=''){q('#app').innerHTML=`${topo('Confira antes de enviar')}<section class="card"><div class="tela"><button class="voltar" id="voltar">← Voltar e corrigir</button><h1>Confira os dados do Pix</h1><div class="conferencia"><div class="linha"><span>Quem recebe</span><b>${esc(destino.nome)}</b></div><div class="linha"><span>Conta</span><b>${esc(destino.conta)}</b></div><div class="linha"><span>Valor</span><b>${esc(rascunho.valor)}</b></div><div class="linha"><span>Descrição</span><b>${esc(rascunho.descricao||'-')}</b></div><div class="linha"><span>Remetente</span><b>${esc(eu.nome)}<br>${esc(eu.conta)}</b></div></div><div class="alerta"><b>Operação simulada</b>Confira nome, conta e valor. Em caso de dúvida, pare e peça ajuda ao professor.</div><label class="rotulo">Digite a senha da turma para confirmar</label><input id="senha-pix" type="password" autocomplete="off"><button id="confirmar">Confirmar Pix</button><p class="erro">${esc(msg)}</p></div></section>${rodape()}`;q('#voltar').onclick=()=>dadosPix();q('#confirmar').onclick=async()=>{const senha=q('#senha-pix').value;if(!senha)return conferencia(destino,'Digite a senha para confirmar o Pix.');try{const r=await api('/api/v2/pix',{method:'POST',body:{conta_destino:rascunho.conta,valor:rascunho.valor,descricao:rascunho.descricao,senha}});comprovante(r)}catch(e){conferencia(destino,e.message)}}}
+function comprovante(r){q('#app').innerHTML=`${topo('Comprovante')}<section class="card"><div class="tela"><h1 style="color:var(--sucesso)">Pix realizado com sucesso!</h1><div class="conferencia"><div class="linha"><span>Remetente</span><b>${esc(r.remetente)}<br>${esc(r.conta_remetente)}</b></div><div class="linha"><span>Destinatária</span><b>${esc(r.nome)}<br>${esc(r.conta)}</b></div><div class="linha"><span>Valor</span><b>${esc(r.valor)}</b></div><div class="linha"><span>Descrição</span><b>${esc(r.descricao||'-')}</b></div><div class="linha"><span>Data e hora</span><b>${esc(r.quando)}</b></div></div><div class="alerta"><b>OPERAÇÃO SIMULADA</b>Este comprovante é fictício e foi criado para a atividade educativa.</div><button id="inicio">Voltar para minha conta</button></div></section>${rodape()}`;q('#inicio').onclick=()=>inicio()}
+async function extrato(){try{const itens=await api('/api/v2/extrato');q('#app').innerHTML=`${topo('Extrato')}<section class="card"><div class="tela"><button class="voltar" id="voltar">← Voltar</button><h1>Suas movimentações</h1><p class="legenda">Veja o que entrou e saiu da sua conta fictícia.</p></div></section><section class="lista">${itens.map(i=>`<div class="item"><div><b>${i.tipo==='enviado'?'Enviado para':'Recebido de'} ${esc(i.nome)}</b><br><span class="quando">Conta ${esc(i.conta)} · ${esc(i.quando)}${i.descricao?' · '+esc(i.descricao):''}</span></div><div class="${i.tipo==='enviado'?'menos':'mais'}">${esc(i.sinal)} ${esc(i.valor)}</div></div>`).join('')||'<p class="legenda">Nenhuma movimentação aqui ainda.</p>'}</section>${rodape()}`;q('#voltar').onclick=()=>inicio()}catch(e){login(e.message)}}
+(async()=>{try{await api('/api/v2/me');inicio()}catch(e){login()}})();</script></body></html>'''
+
 
 # ---------------------------------------------------------------------------
 # Servidor
@@ -1043,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if caminho == "/":
-            self.enviar_html(PAGINA_V2)
+            self.enviar_html(PAGINA_V2_RENOVADA)
             return
 
         if caminho in ("/app", "/v1"):
@@ -1051,7 +1064,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if caminho == "/v2":
-            self.enviar_html(PAGINA_V2)
+            self.enviar_html(PAGINA_V2_RENOVADA)
             return
 
         if caminho == "/admin":
@@ -1151,8 +1164,26 @@ class Handler(BaseHTTPRequestHandler):
                     "quando": self.formatar_data_hora(item["criada_em"]),
                     "valor": self.formatar_centavos(item["valor"]),
                     "sinal": "-" if item["tipo"] == "enviado" else "+",
+                    "descricao": item["descricao"],
                 })
             self.enviar_json(itens)
+            return
+
+        if caminho == "/api/v2/destinataria":
+            if not self.exigir_v2_disponivel():
+                return
+            origem = self.exigir_aluna_v2()
+            if origem is None:
+                return
+            conta = (parse_qs(urlparse(self.path).query).get("conta") or [""])[0].strip()
+            try:
+                destino = storage.buscar_aluna_por_codigo(V2_DB, conta)
+                if destino["turma_id"] != origem["turma_id"] or destino["id"] == origem["id"]:
+                    raise storage.ContaNaoEncontrada("Conta indisponível.")
+            except storage.ContaNaoEncontrada:
+                self.enviar_json({"erro": "Não foi possível localizar essa conta na sua turma."}, status=400)
+                return
+            self.enviar_json({"nome": destino["nome"], "conta": self.formatar_conta(destino["codigo_conta"])})
             return
 
         if caminho == "/api/me":
@@ -1253,11 +1284,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             dados = self.ler_json()
             try:
+                senha = str(dados.get("senha", ""))
+                if not storage.validar_senha_turma(V2_DB, origem["turma_id"], senha):
+                    self.enviar_json({"erro": "Senha incorreta. Confira e tente novamente."}, status=403)
+                    return
                 destino = storage.buscar_aluna_por_codigo(
                     V2_DB, str(dados.get("conta_destino", "")).strip()
                 )
                 valor = valor_para_centavos(str(dados.get("valor", "")))
-                storage.executar_pix(V2_DB, origem["turma_id"], origem["id"], destino["id"], valor)
+                resultado = storage.executar_pix(
+                    V2_DB, origem["turma_id"], origem["id"], destino["id"], valor,
+                    descricao=str(dados.get("descricao", "")),
+                )
             except storage.ContaNaoEncontrada:
                 self.enviar_json({"erro": "Não foi possível realizar este Pix."}, status=400)
                 return
@@ -1265,7 +1303,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.enviar_json({"erro": str(erro)}, status=400)
                 return
             self.enviar_json({
-                "ok": True, "nome": destino["nome"], "valor": self.formatar_centavos(valor),
+                "ok": True, "remetente": origem["nome"], "conta_remetente": self.formatar_conta(origem["codigo_conta"]),
+                "nome": destino["nome"], "conta": self.formatar_conta(destino["codigo_conta"]),
+                "valor": self.formatar_centavos(valor), "descricao": str(dados.get("descricao", "")).strip(),
+                "quando": self.formatar_data_hora(resultado["criada_em"]),
             })
             return
 

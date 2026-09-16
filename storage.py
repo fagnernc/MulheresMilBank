@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS transacoes (
     origem_aluna_id INTEGER NOT NULL,
     destino_aluna_id INTEGER NOT NULL,
     valor INTEGER NOT NULL CHECK (valor > 0),
+    descricao TEXT NOT NULL DEFAULT '',
     criada_em TEXT NOT NULL,
     CHECK (origem_aluna_id <> destino_aluna_id),
     FOREIGN KEY (turma_id) REFERENCES turmas(id) ON DELETE RESTRICT,
@@ -156,6 +157,9 @@ def inicializar_banco(caminho_banco=None):
     caminho.parent.mkdir(parents=True, exist_ok=True)
     with conexao(caminho) as banco:
         banco.executescript(SCHEMA)
+        colunas = {linha["name"] for linha in banco.execute("PRAGMA table_info(transacoes)")}
+        if "descricao" not in colunas:
+            banco.execute("ALTER TABLE transacoes ADD COLUMN descricao TEXT NOT NULL DEFAULT ''")
         banco.commit()
     return caminho
 
@@ -449,6 +453,12 @@ def redefinir_senha_turma(caminho_banco, turma_id, nova_senha):
     return buscar_turma(caminho_banco, turma_id)
 
 
+def validar_senha_turma(caminho_banco, turma_id, senha):
+    with conexao(caminho_banco) as banco:
+        linha = banco.execute("SELECT senha FROM turmas WHERE id = ?", (turma_id,)).fetchone()
+    return linha is not None and verificar_senha_turma(senha, linha["senha"])
+
+
 def listar_alunas_turma(caminho_banco, turma_id):
     with conexao(caminho_banco) as banco:
         linhas = banco.execute(
@@ -521,11 +531,12 @@ def listar_extrato_aluna(caminho_banco, aluna_id):
             "nome": transacao["destino_nome"] if enviado else transacao["origem_nome"],
             "codigo_conta": transacao["destino_conta"] if enviado else transacao["origem_conta"],
             "valor": transacao["valor"],
+            "descricao": transacao["descricao"],
         })
     return itens
 
 
-def executar_pix(caminho_banco, turma_id, origem_aluna_id, destino_aluna_id, valor_centavos, agora=None, timezone_nome=None):
+def executar_pix(caminho_banco, turma_id, origem_aluna_id, destino_aluna_id, valor_centavos, agora=None, timezone_nome=None, descricao=""):
     """Executa débito, crédito e registro de transação em uma única transação SQLite."""
     if isinstance(valor_centavos, bool) or not isinstance(valor_centavos, int) or valor_centavos <= 0:
         raise ValorInvalido("O valor deve ser um número inteiro positivo de centavos.")
@@ -558,13 +569,15 @@ def executar_pix(caminho_banco, turma_id, origem_aluna_id, destino_aluna_id, val
                 "UPDATE alunas SET saldo = saldo + ? WHERE id = ?",
                 (valor_centavos, destino_aluna_id),
             )
+            criada_em = _para_iso(agora or datetime.now(), timezone_nome)
             banco.execute(
                 """INSERT INTO transacoes
-                   (turma_id, origem_aluna_id, destino_aluna_id, valor, criada_em)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (turma_id, origem_aluna_id, destino_aluna_id, valor_centavos, _para_iso(agora or datetime.now(), timezone_nome)),
+                   (turma_id, origem_aluna_id, destino_aluna_id, valor, descricao, criada_em)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (turma_id, origem_aluna_id, destino_aluna_id, valor_centavos, str(descricao or "").strip(), criada_em),
             )
             banco.commit()
         except Exception:
             banco.rollback()
             raise
+    return {"criada_em": criada_em}

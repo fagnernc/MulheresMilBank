@@ -205,11 +205,45 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
             self.app.sessoes_v2[token] = (self.aluna_projecao["id"], datetime.now() + self.app.SESSAO_V2_TTL)
         resposta = self.requisicao_http(
             "POST", "/api/v2/pix",
-            json.dumps({"conta_destino": destino["codigo_conta"], "valor": "1,00", "aluna_id": destino["id"]}),
+            json.dumps({"conta_destino": destino["codigo_conta"], "valor": "1,00", "senha": "senha-da-turma", "descricao": "Teste", "aluna_id": destino["id"]}),
             {"Cookie": f"sessao_v2={token}"},
         )
         self.assertEqual(resposta, (200, None))
         self.assertEqual(self.app.storage.buscar_aluna(self.app.V2_DB, self.aluna_projecao["id"])["saldo"], 99_900)
+
+    def test_http_destinataria_v2_so_retorna_conta_da_mesma_turma(self):
+        destino = self.app.storage.criar_aluna(self.app.V2_DB, self.turma["id"], "Destino seguro")
+        outra = self.app.storage.criar_turma(
+            self.app.V2_DB, "Outra turma", datetime.now() - timedelta(hours=1),
+            datetime.now() + timedelta(hours=1), 100_000, "senha",
+        )
+        externa = self.app.storage.criar_aluna(self.app.V2_DB, outra["id"], "Externa")
+        token = "sessao-v2-destinataria"
+        with self.app.lock:
+            self.app.sessoes_v2[token] = (self.aluna_projecao["id"], datetime.now() + self.app.SESSAO_V2_TTL)
+        cabecalho = {"Cookie": f"sessao_v2={token}"}
+        status, _, corpo = self.requisicao_http(
+            "GET", f"/api/v2/destinataria?conta={destino['codigo_conta']}", cabecalhos_adicionais=cabecalho, com_corpo=True
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(corpo), {"nome": "Destino seguro", "conta": f"{destino['codigo_conta'][:3]} {destino['codigo_conta'][3:]}"})
+        self.assertEqual(
+            self.requisicao_http("GET", f"/api/v2/destinataria?conta={externa['codigo_conta']}", cabecalhos_adicionais=cabecalho)[0], 400
+        )
+
+    def test_http_pix_v2_senha_incorreta_nao_movimenta(self):
+        destino = self.app.storage.criar_aluna(self.app.V2_DB, self.turma["id"], "Destino senha")
+        token = "sessao-v2-senha"
+        with self.app.lock:
+            self.app.sessoes_v2[token] = (self.aluna_projecao["id"], datetime.now() + self.app.SESSAO_V2_TTL)
+        saldo_antes = self.app.storage.buscar_aluna(self.app.V2_DB, self.aluna_projecao["id"])["saldo"]
+        resposta = self.requisicao_http(
+            "POST", "/api/v2/pix",
+            json.dumps({"conta_destino": destino["codigo_conta"], "valor": "1,00", "senha": "incorreta"}),
+            {"Cookie": f"sessao_v2={token}"},
+        )
+        self.assertEqual(resposta[0], 403)
+        self.assertEqual(self.app.storage.buscar_aluna(self.app.V2_DB, self.aluna_projecao["id"])["saldo"], saldo_antes)
 
     def test_valor_para_centavos_aceita_formatos_previstos(self):
         for valor in ("1000", "1000,00", "1.000,00", "1000.00", "R$ 1.000,00"):
