@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 TIMEZONE_PADRAO = "America/Maceio"
 MAX_TENTATIVAS_CODIGO = 100
+MAX_ALUNAS_POR_LOTE = 100
 
 
 class ErroStorage(Exception):
@@ -44,6 +45,18 @@ class ValorInvalido(ErroStorage):
 
 
 class CodigoContaInvalido(ErroStorage):
+    pass
+
+
+class TurmaNaoAceitaAlteracoes(ErroStorage):
+    pass
+
+
+class AlunaComTransacoes(ErroStorage):
+    pass
+
+
+class AlunaNaoPertenceTurma(ErroStorage):
     pass
 
 
@@ -293,6 +306,13 @@ def gerar_codigo_conta(banco):
     raise ErroStorage("Não foi possível gerar um código de conta único.")
 
 
+def _validar_turma_para_alteracoes(turma, agora=None, timezone_nome=None):
+    if status_turma(dict(turma), agora, timezone_nome) not in ("AGENDADA", "ATIVA"):
+        raise TurmaNaoAceitaAlteracoes(
+            "Esta turma não aceita alterações porque está expirada ou encerrada."
+        )
+
+
 def criar_aluna(caminho_banco, turma_id, nome, codigo_conta=None, agora=None, timezone_nome=None):
     if not nome or not nome.strip():
         raise ValorInvalido("O nome da aluna é obrigatório.")
@@ -300,9 +320,10 @@ def criar_aluna(caminho_banco, turma_id, nome, codigo_conta=None, agora=None, ti
         raise CodigoContaInvalido("O código da conta deve ter seis dígitos e não começar com zero.")
 
     with conexao(caminho_banco) as banco:
-        turma = banco.execute("SELECT saldo_inicial FROM turmas WHERE id = ?", (turma_id,)).fetchone()
+        turma = banco.execute("SELECT * FROM turmas WHERE id = ?", (turma_id,)).fetchone()
         if turma is None:
             raise ContaNaoEncontrada("Turma não encontrada.")
+        _validar_turma_para_alteracoes(turma, agora, timezone_nome)
         codigo = codigo_conta or gerar_codigo_conta(banco)
         try:
             cursor = banco.execute(
@@ -319,12 +340,92 @@ def criar_aluna(caminho_banco, turma_id, nome, codigo_conta=None, agora=None, ti
     return dict(linha)
 
 
+def criar_alunas_em_lote(caminho_banco, turma_id, nomes, agora=None, timezone_nome=None):
+    """Cria todas as alunas do lote ou nenhuma delas, em uma transação."""
+    if isinstance(nomes, str):
+        nomes = nomes.splitlines()
+    nomes_validos = [nome.strip() for nome in nomes if isinstance(nome, str) and nome.strip()]
+    if not nomes_validos:
+        raise ValorInvalido("Informe ao menos um nome de aluna.")
+    if len(nomes_validos) > MAX_ALUNAS_POR_LOTE:
+        raise ValorInvalido(f"O limite por lote é de {MAX_ALUNAS_POR_LOTE} alunas.")
+
+    with conexao(caminho_banco) as banco:
+        try:
+            banco.execute("BEGIN IMMEDIATE")
+            turma = banco.execute("SELECT * FROM turmas WHERE id = ?", (turma_id,)).fetchone()
+            if turma is None:
+                raise ContaNaoEncontrada("Turma não encontrada.")
+            _validar_turma_para_alteracoes(turma, agora, timezone_nome)
+            criada_em = _para_iso(agora or datetime.now(), timezone_nome)
+            alunas = []
+            for nome in nomes_validos:
+                codigo = gerar_codigo_conta(banco)
+                cursor = banco.execute(
+                    """INSERT INTO alunas (turma_id, nome, codigo_conta, saldo, criada_em)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (turma_id, nome, codigo, turma["saldo_inicial"], criada_em),
+                )
+                alunas.append({
+                    "id": cursor.lastrowid,
+                    "turma_id": turma_id,
+                    "nome": nome,
+                    "codigo_conta": codigo,
+                    "saldo": turma["saldo_inicial"],
+                    "criada_em": criada_em,
+                })
+            banco.commit()
+        except Exception:
+            banco.rollback()
+            raise
+    return alunas
+
+
 def buscar_aluna(caminho_banco, aluna_id):
     with conexao(caminho_banco) as banco:
         linha = banco.execute("SELECT * FROM alunas WHERE id = ?", (aluna_id,)).fetchone()
     if linha is None:
         raise ContaNaoEncontrada("Conta não encontrada.")
     return dict(linha)
+
+
+def listar_alunas_turma(caminho_banco, turma_id):
+    with conexao(caminho_banco) as banco:
+        linhas = banco.execute(
+            """SELECT * FROM alunas WHERE turma_id = ?
+               ORDER BY nome COLLATE NOCASE, id""",
+            (turma_id,),
+        ).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def excluir_aluna(caminho_banco, turma_id, aluna_id, agora=None, timezone_nome=None):
+    """Exclui uma conta sem movimentações da turma informada."""
+    with conexao(caminho_banco) as banco:
+        try:
+            banco.execute("BEGIN IMMEDIATE")
+            turma = banco.execute("SELECT * FROM turmas WHERE id = ?", (turma_id,)).fetchone()
+            if turma is None:
+                raise ContaNaoEncontrada("Turma não encontrada.")
+            _validar_turma_para_alteracoes(turma, agora, timezone_nome)
+            aluna = banco.execute("SELECT * FROM alunas WHERE id = ?", (aluna_id,)).fetchone()
+            if aluna is None:
+                raise ContaNaoEncontrada("Conta não encontrada.")
+            if aluna["turma_id"] != turma_id:
+                raise AlunaNaoPertenceTurma("A aluna não pertence a esta turma.")
+            transacao = banco.execute(
+                """SELECT 1 FROM transacoes
+                   WHERE origem_aluna_id = ? OR destino_aluna_id = ? LIMIT 1""",
+                (aluna_id, aluna_id),
+            ).fetchone()
+            if transacao is not None:
+                raise AlunaComTransacoes("Não é possível excluir uma aluna com movimentações.")
+            banco.execute("DELETE FROM alunas WHERE id = ?", (aluna_id,))
+            banco.commit()
+        except Exception:
+            banco.rollback()
+            raise
+    return dict(aluna)
 
 
 def listar_transacoes(caminho_banco, turma_id):

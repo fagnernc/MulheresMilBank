@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 import storage
@@ -16,7 +17,7 @@ class StorageTestCase(unittest.TestCase):
         self.temporario = tempfile.TemporaryDirectory()
         self.banco = Path(self.temporario.name) / "mulheresmilbank.db"
         storage.inicializar_banco(self.banco)
-        self.agora = datetime(2026, 9, 15, 10, 0, tzinfo=FUSO)
+        self.agora = datetime.now(FUSO).replace(second=0, microsecond=0)
 
     def tearDown(self):
         self.temporario.cleanup()
@@ -169,8 +170,9 @@ class StorageTestCase(unittest.TestCase):
 
     def test_pix_rejeita_turma_expirada(self):
         turma = self.criar_turma_ativa(validade_em=self.agora - timedelta(seconds=1))
-        origem = storage.criar_aluna(self.banco, turma["id"], "Ana")
-        destino = storage.criar_aluna(self.banco, turma["id"], "Bia")
+        antes_da_expiracao = self.agora - timedelta(seconds=2)
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=antes_da_expiracao)
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=antes_da_expiracao)
         with self.assertRaises(storage.TurmaInativa):
             storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
 
@@ -184,6 +186,114 @@ class StorageTestCase(unittest.TestCase):
         self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["saldo"], 100_000)
         self.assertEqual(storage.buscar_aluna(self.banco, destino["id"])["saldo"], 100_000)
         self.assertEqual(storage.listar_transacoes(self.banco, turma["id"]), [])
+
+    def test_lista_alunas_da_turma_ordenada_por_nome(self):
+        turma = self.criar_turma_ativa()
+        storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        self.assertEqual(
+            [aluna["nome"] for aluna in storage.listar_alunas_turma(self.banco, turma["id"])],
+            ["Ana", "Bia"],
+        )
+
+    def test_cria_alunas_em_lote_ignora_linhas_vazias_e_permite_nomes_iguais(self):
+        turma = self.criar_turma_ativa()
+        alunas = storage.criar_alunas_em_lote(
+            self.banco, turma["id"], "  Ana  \n\nBia\n Ana\n", agora=self.agora
+        )
+        self.assertEqual([aluna["nome"] for aluna in alunas], ["Ana", "Bia", "Ana"])
+        self.assertEqual(len({aluna["codigo_conta"] for aluna in alunas}), 3)
+        self.assertTrue(all(aluna["saldo"] == 100_000 for aluna in alunas))
+
+    def test_lote_vazio_e_rejeitado(self):
+        turma = self.criar_turma_ativa()
+        with self.assertRaises(storage.ValorInvalido):
+            storage.criar_alunas_em_lote(self.banco, turma["id"], " \n\n ", agora=self.agora)
+        self.assertEqual(storage.listar_alunas_turma(self.banco, turma["id"]), [])
+
+    def test_lote_acima_do_limite_e_rejeitado_integralmente(self):
+        turma = self.criar_turma_ativa()
+        nomes = [f"Aluna {numero}" for numero in range(storage.MAX_ALUNAS_POR_LOTE + 1)]
+        with self.assertRaises(storage.ValorInvalido):
+            storage.criar_alunas_em_lote(self.banco, turma["id"], nomes, agora=self.agora)
+        self.assertEqual(storage.listar_alunas_turma(self.banco, turma["id"]), [])
+
+    def test_falha_no_lote_faz_rollback_integral(self):
+        turma = self.criar_turma_ativa()
+        gerar_codigo = storage.gerar_codigo_conta
+        chamadas = 0
+
+        def falhar_na_segunda_chamada(banco):
+            nonlocal chamadas
+            chamadas += 1
+            if chamadas == 2:
+                raise storage.ErroStorage("falha simulada")
+            return gerar_codigo(banco)
+
+        with mock.patch.object(storage, "gerar_codigo_conta", falhar_na_segunda_chamada):
+            with self.assertRaises(storage.ErroStorage):
+                storage.criar_alunas_em_lote(
+                    self.banco, turma["id"], ["Ana", "Bia"], agora=self.agora
+                )
+        self.assertEqual(storage.listar_alunas_turma(self.banco, turma["id"]), [])
+
+    def test_cadastro_e_rejeitado_em_turma_expirada(self):
+        turma = self.criar_turma_ativa(validade_em=self.agora - timedelta(seconds=1))
+        with self.assertRaises(storage.TurmaNaoAceitaAlteracoes):
+            storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+
+    def test_cadastro_e_rejeitado_em_turma_encerrada(self):
+        turma = self.criar_turma_ativa()
+        storage.encerrar_turma(self.banco, turma["id"], self.agora)
+        with self.assertRaises(storage.TurmaNaoAceitaAlteracoes):
+            storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+
+    def test_cadastro_e_permitido_em_turma_agendada(self):
+        turma = self.criar_turma_ativa(
+            inicio_em=self.agora + timedelta(hours=1),
+            validade_em=self.agora + timedelta(hours=2),
+        )
+        aluna = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        self.assertEqual(aluna["turma_id"], turma["id"])
+
+    def test_exclui_aluna_sem_transacoes(self):
+        turma = self.criar_turma_ativa()
+        aluna = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        excluida = storage.excluir_aluna(self.banco, turma["id"], aluna["id"], agora=self.agora)
+        self.assertEqual(excluida["id"], aluna["id"])
+        with self.assertRaises(storage.ContaNaoEncontrada):
+            storage.buscar_aluna(self.banco, aluna["id"])
+
+    def test_exclusao_e_rejeitada_quando_aluna_tem_transacoes(self):
+        turma = self.criar_turma_ativa()
+        origem = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        destino = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
+        with self.assertRaises(storage.AlunaComTransacoes):
+            storage.excluir_aluna(self.banco, turma["id"], origem["id"], agora=self.agora)
+        self.assertEqual(storage.buscar_aluna(self.banco, origem["id"])["nome"], "Ana")
+
+    def test_exclusao_e_rejeitada_para_aluna_de_outra_turma(self):
+        primeira = self.criar_turma_ativa(nome="Primeira")
+        segunda = self.criar_turma_ativa(nome="Segunda")
+        aluna = storage.criar_aluna(self.banco, segunda["id"], "Ana", agora=self.agora)
+        with self.assertRaises(storage.AlunaNaoPertenceTurma):
+            storage.excluir_aluna(self.banco, primeira["id"], aluna["id"], agora=self.agora)
+
+    def test_exclusao_e_rejeitada_em_turma_expirada_ou_encerrada(self):
+        expirada = self.criar_turma_ativa()
+        aluna_expirada = storage.criar_aluna(self.banco, expirada["id"], "Ana", agora=self.agora)
+        storage.alterar_validade_turma(
+            self.banco, expirada["id"], self.agora - timedelta(seconds=1)
+        )
+        with self.assertRaises(storage.TurmaNaoAceitaAlteracoes):
+            storage.excluir_aluna(self.banco, expirada["id"], aluna_expirada["id"], agora=self.agora)
+
+        encerrada = self.criar_turma_ativa(nome="Encerrada")
+        aluna_encerrada = storage.criar_aluna(self.banco, encerrada["id"], "Bia", agora=self.agora)
+        storage.encerrar_turma(self.banco, encerrada["id"], self.agora)
+        with self.assertRaises(storage.TurmaNaoAceitaAlteracoes):
+            storage.excluir_aluna(self.banco, encerrada["id"], aluna_encerrada["id"], agora=self.agora)
 
     def test_pix_e_atomico_se_registro_da_transacao_falhar(self):
         turma = self.criar_turma_ativa()

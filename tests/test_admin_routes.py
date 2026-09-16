@@ -4,8 +4,10 @@ import os
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta
 from email.message import Message
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 class AdminTurmasRoutesTestCase(unittest.TestCase):
@@ -21,6 +23,15 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
         cls.app = importlib.import_module("app")
         if not cls.app.inicializar_v2():
             raise RuntimeError("Não foi possível inicializar o SQLite de teste da V2.")
+        agora = datetime.now()
+        cls.turma = cls.app.storage.criar_turma(
+            cls.app.V2_DB,
+            "Turma HTTP",
+            agora - timedelta(hours=1),
+            agora + timedelta(hours=1),
+            100_000,
+            "senha-da-turma",
+        )
         cls.servidor = cls.app.ThreadingHTTPServer(("127.0.0.1", 0), cls.app.Handler)
         cls.porta = cls.servidor.server_address[1]
         cls.thread_servidor = threading.Thread(target=cls.servidor.serve_forever, daemon=True)
@@ -38,9 +49,9 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
                 os.environ[chave] = valor
         cls.temporario.cleanup()
 
-    def requisicao_http(self, metodo, caminho, corpo=None):
+    def requisicao_http(self, metodo, caminho, corpo=None, cabecalhos_adicionais=None):
         conexao = http.client.HTTPConnection("127.0.0.1", self.porta, timeout=2)
-        cabecalhos = {}
+        cabecalhos = dict(cabecalhos_adicionais or {})
         if corpo is not None:
             cabecalhos["Content-Type"] = "application/x-www-form-urlencoded"
         conexao.request(metodo, caminho, body=corpo, headers=cabecalhos)
@@ -67,6 +78,14 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
     def test_http_formulario_de_turma_redireciona_sem_sessao(self):
         self.assertEqual(self.requisicao_http("GET", "/admin/turmas/nova"), (303, "/admin/login"))
 
+    def test_http_nova_aluna_redireciona_sem_sessao(self):
+        caminho = f"/admin/turmas/{self.turma['id']}/alunas/nova"
+        self.assertEqual(self.requisicao_http("GET", caminho), (303, "/admin/login"))
+
+    def test_http_lote_redireciona_sem_sessao(self):
+        caminho = f"/admin/turmas/{self.turma['id']}/alunas/lote"
+        self.assertEqual(self.requisicao_http("GET", caminho), (303, "/admin/login"))
+
     def test_http_criacao_de_turma_sem_sessao_nao_persiste(self):
         antes = len(self.app.storage.listar_turmas(self.app.V2_DB))
         resposta = self.requisicao_http(
@@ -79,6 +98,27 @@ class AdminTurmasRoutesTestCase(unittest.TestCase):
         depois = len(self.app.storage.listar_turmas(self.app.V2_DB))
         self.assertEqual(resposta, (303, "/admin/login"))
         self.assertEqual(depois, antes)
+
+    def test_http_exclusao_sem_sessao_nao_remove_aluna(self):
+        aluna = self.app.storage.criar_aluna(self.app.V2_DB, self.turma["id"], "Ana HTTP")
+        caminho = f"/admin/turmas/{self.turma['id']}/alunas/{aluna['id']}/excluir"
+        self.assertEqual(self.requisicao_http("POST", caminho), (303, "/admin/login"))
+        self.assertEqual(self.app.storage.buscar_aluna(self.app.V2_DB, aluna["id"])["nome"], "Ana HTTP")
+
+    def test_http_cadastro_autenticado_preserva_nome_utf8(self):
+        token = "sessao-admin-http-teste"
+        with self.app.lock:
+            self.app.sessoes_admin[token] = datetime.now() + self.app.SESSAO_ADMIN_TTL
+        caminho = f"/admin/turmas/{self.turma['id']}/alunas/criar"
+        resposta = self.requisicao_http(
+            "POST",
+            caminho,
+            urlencode({"nome": "Patrícia Souza"}),
+            {"Cookie": f"sessao_admin={token}"},
+        )
+        alunas = self.app.storage.listar_alunas_turma(self.app.V2_DB, self.turma["id"])
+        self.assertEqual(resposta, (303, f"/admin/turmas/{self.turma['id']}"))
+        self.assertIn("Patrícia Souza", [aluna["nome"] for aluna in alunas])
 
     def test_valor_para_centavos_aceita_formatos_previstos(self):
         for valor in ("1000", "1000,00", "1.000,00", "1000.00", "R$ 1.000,00"):

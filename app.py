@@ -764,8 +764,21 @@ PAGINA_NOVA_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UT
 
 PAGINA_DETALHE_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Gerenciar turma - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
 <p><a href="/admin/turmas">← Turmas</a></p><h1>__NOME__</h1>__ERRO__<div class="cartao"><span class="status __STATUS__">__STATUS__</span><p>__DESCRICAO__</p><div class="dados"><div><div class="rotulo">Início</div>__INICIO__</div><div><div class="rotulo">Validade</div>__VALIDADE__</div><div><div class="rotulo">Saldo inicial</div>__SALDO__</div><div><div class="rotulo">Alunas</div>__QUANTIDADE__</div><div><div class="rotulo">Criada em</div>__CRIADA__</div></div></div>
+<div class="cartao"><h2>Alunas</h2><p>__QUANTIDADE__ cadastradas</p>__ACOES_ALUNAS____LISTA_ALUNAS__</div>
 <div class="cartao"><h2>Alterar validade</h2><form method="POST" action="/admin/turmas/__ID__/validade"><div class="linha"><div><label for="validade_data">Data</label><input id="validade_data" name="validade_data" type="date" required value="__VALIDADE_DATA__"></div><div><label for="validade_hora">Hora</label><input id="validade_hora" name="validade_hora" type="time" required value="__VALIDADE_HORA__"></div></div><button type="submit">Alterar validade</button></form></div>
 <div class="cartao"><h2>Encerrar turma</h2><p class="aviso">Uma turma encerrada não pode ser reaberta nesta etapa.</p><form method="POST" action="/admin/turmas/__ID__/encerrar" onsubmit="return confirm('Encerrar esta turma? As contas não poderão operar.');"><button class="perigo" type="submit">Encerrar turma</button></form></div>
+</main></body></html>"""
+
+
+PAGINA_NOVA_ALUNA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Adicionar aluna - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
+<p><a href="/admin/turmas/__TURMA_ID__">← Gerenciar turma</a></p><h1>Adicionar aluna</h1>__ERRO__
+<form class="cartao" method="POST" action="/admin/turmas/__TURMA_ID__/alunas/criar"><label for="nome">Nome da aluna *</label><input id="nome" name="nome" required value="__NOME__"><p class="aviso">A conta temporária será gerada automaticamente.</p><button type="submit">Cadastrar aluna</button></form>
+</main></body></html>"""
+
+
+PAGINA_LOTE_ALUNAS = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Adicionar alunas em lote - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
+<p><a href="/admin/turmas/__TURMA_ID__">← Gerenciar turma</a></p><h1>Adicionar alunas em lote</h1>__ERRO__
+<form class="cartao" method="POST" action="/admin/turmas/__TURMA_ID__/alunas/lote"><label for="nomes">Nomes das alunas *</label><p class="aviso">Digite ou cole os nomes das alunas, um nome por linha. Limite de 100 por vez.</p><textarea id="nomes" name="nomes" required>__NOMES__</textarea><button type="submit">Cadastrar alunas</button></form>
 </main></body></html>"""
 
 
@@ -896,6 +909,19 @@ class Handler(BaseHTTPRequestHandler):
             return int(partes[2])
         return None
 
+    def ids_exclusao_aluna_da_rota(self, caminho):
+        partes = caminho.strip("/").split("/")
+        if (
+            len(partes) == 6
+            and partes[:2] == ["admin", "turmas"]
+            and partes[2].isdigit()
+            and partes[3] == "alunas"
+            and partes[4].isdigit()
+            and partes[5] == "excluir"
+        ):
+            return int(partes[2]), int(partes[4])
+        return None
+
     # -- rotas ------------------------------------------------------------
 
     def do_GET(self):
@@ -959,6 +985,22 @@ class Handler(BaseHTTPRequestHandler):
             if not self.exigir_v2_disponivel():
                 return
             self.mostrar_detalhe_turma(turma_id)
+            return
+
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/alunas/nova":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_formulario_aluna(turma_id)
+            return
+
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/alunas/lote":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_formulario_lote(turma_id)
             return
 
         if caminho == "/api/me":
@@ -1188,6 +1230,51 @@ class Handler(BaseHTTPRequestHandler):
             self.redirecionar(f"/admin/turmas/{turma_id}")
             return
 
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/alunas/criar":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            campos = self.ler_formulario()
+            try:
+                nome = (campos.get("nome") or [""])[0]
+                storage.criar_aluna(V2_DB, turma_id, nome)
+            except (ValueError, storage.ErroStorage) as erro:
+                self.mostrar_formulario_aluna(turma_id, str(erro), campos, status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
+            return
+
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/alunas/lote":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            campos = self.ler_formulario()
+            try:
+                nomes = (campos.get("nomes") or [""])[0].splitlines()
+                storage.criar_alunas_em_lote(V2_DB, turma_id, nomes)
+            except (ValueError, storage.ErroStorage) as erro:
+                self.mostrar_formulario_lote(turma_id, str(erro), campos, status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
+            return
+
+        ids_exclusao = self.ids_exclusao_aluna_da_rota(caminho)
+        if ids_exclusao is not None:
+            turma_id, aluna_id = ids_exclusao
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            try:
+                storage.excluir_aluna(V2_DB, turma_id, aluna_id)
+            except storage.ErroStorage as erro:
+                self.mostrar_detalhe_turma(turma_id, str(erro), status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
+            return
+
         if caminho == "/admin/resetar":
             if not self.tem_sessao_admin():
                 self.enviar_html("<h1>Acesso não autorizado</h1>", status=403)
@@ -1281,6 +1368,42 @@ class Handler(BaseHTTPRequestHandler):
         validade = datetime.fromisoformat(turma["validade_em"])
         mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
         descricao = html.escape(turma["descricao"] or "Sem descrição.")
+        pode_alterar_alunas = status_turma in ("AGENDADA", "ATIVA")
+        alunas = storage.listar_alunas_turma(V2_DB, turma_id)
+        if alunas:
+            linhas_alunas = ""
+            for aluna in alunas:
+                nome = html.escape(aluna["nome"])
+                acao = ""
+                if pode_alterar_alunas:
+                    acao = (
+                        f'<form method="POST" action="/admin/turmas/{turma_id}/alunas/{aluna["id"]}/excluir" '
+                        'onsubmit="return confirm(\'Excluir esta aluna? Esta ação removerá a conta.\');">'
+                        '<button class="perigo" type="submit">Excluir</button></form>'
+                    )
+                else:
+                    acao = '<span class="aviso">Alterações indisponíveis</span>'
+                linhas_alunas += (
+                    "<tr>"
+                    f"<td>{nome}</td><td>{aluna['codigo_conta']}</td>"
+                    f"<td>{self.formatar_centavos(aluna['saldo'])}</td><td>{acao}</td>"
+                    "</tr>"
+                )
+            lista_alunas = (
+                "<table><tr><th>Nome</th><th>Conta</th><th>Saldo</th><th>Ação</th></tr>"
+                f"{linhas_alunas}</table>"
+            )
+        else:
+            lista_alunas = '<p class="aviso">Nenhuma aluna cadastrada nesta turma.</p>'
+        if pode_alterar_alunas:
+            acoes_alunas = (
+                f'<div class="acoes"><a class="botao" href="/admin/turmas/{turma_id}/alunas/nova">'
+                '+ Adicionar aluna</a>'
+                f'<a class="botao secundario" href="/admin/turmas/{turma_id}/alunas/lote">'
+                'Adicionar em lote</a></div>'
+            )
+        else:
+            acoes_alunas = '<p class="aviso">Cadastros e exclusões estão indisponíveis para esta turma.</p>'
         pagina = PAGINA_DETALHE_TURMA
         substituicoes = {
             "__ESTILO__": ESTILO_TURMAS,
@@ -1296,9 +1419,55 @@ class Handler(BaseHTTPRequestHandler):
             "__ID__": str(turma_id),
             "__VALIDADE_DATA__": validade.strftime("%Y-%m-%d"),
             "__VALIDADE_HORA__": validade.strftime("%H:%M"),
+            "__ACOES_ALUNAS__": acoes_alunas,
+            "__LISTA_ALUNAS__": lista_alunas,
         }
         for marcador, conteudo in substituicoes.items():
             pagina = pagina.replace(marcador, conteudo)
+        self.enviar_html(pagina, status=status)
+
+    def mostrar_formulario_aluna(self, turma_id, erro=None, campos=None, status=200):
+        try:
+            turma = storage.buscar_turma(V2_DB, turma_id)
+        except storage.ContaNaoEncontrada:
+            self.enviar_html("<h1>Turma não encontrada</h1>", status=404)
+            return
+        campos = campos or {}
+        mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
+        if storage.status_turma(turma) not in ("AGENDADA", "ATIVA"):
+            self.mostrar_detalhe_turma(
+                turma_id,
+                "Cadastros estão indisponíveis para esta turma.",
+                status=400,
+            )
+            return
+        pagina = PAGINA_NOVA_ALUNA
+        pagina = pagina.replace("__ESTILO__", ESTILO_TURMAS)
+        pagina = pagina.replace("__TURMA_ID__", str(turma_id))
+        pagina = pagina.replace("__ERRO__", mensagem)
+        pagina = pagina.replace("__NOME__", html.escape((campos.get("nome") or [""])[0]))
+        self.enviar_html(pagina, status=status)
+
+    def mostrar_formulario_lote(self, turma_id, erro=None, campos=None, status=200):
+        try:
+            turma = storage.buscar_turma(V2_DB, turma_id)
+        except storage.ContaNaoEncontrada:
+            self.enviar_html("<h1>Turma não encontrada</h1>", status=404)
+            return
+        campos = campos or {}
+        mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
+        if storage.status_turma(turma) not in ("AGENDADA", "ATIVA"):
+            self.mostrar_detalhe_turma(
+                turma_id,
+                "Cadastros estão indisponíveis para esta turma.",
+                status=400,
+            )
+            return
+        pagina = PAGINA_LOTE_ALUNAS
+        pagina = pagina.replace("__ESTILO__", ESTILO_TURMAS)
+        pagina = pagina.replace("__TURMA_ID__", str(turma_id))
+        pagina = pagina.replace("__ERRO__", mensagem)
+        pagina = pagina.replace("__NOMES__", html.escape((campos.get("nomes") or [""])[0]))
         self.enviar_html(pagina, status=status)
 
     def redirecionar(self, destino):
