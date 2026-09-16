@@ -23,17 +23,22 @@ bancário real e não deve ser usado com dinheiro ou dados reais.
 """
 
 import csv
+from decimal import Decimal, InvalidOperation
 import hmac
 import html
 import json
 import os
+import re
 import secrets
 import socket
+import sys
 import threading
 from datetime import datetime, timedelta
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+
+import storage
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
@@ -50,6 +55,65 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").strip().lower() in {
     "1", "true", "yes", "on",
 }
 SESSAO_ADMIN_TTL = timedelta(hours=4)
+V2_DB = storage.caminho_padrao_banco(DATA_DIR)
+V2_INICIALIZADA = False
+V2_DISPONIVEL = False
+V2_ERRO_INICIALIZACAO = None
+lock_v2 = threading.Lock()
+
+
+def inicializar_v2():
+    """Inicializa o SQLite uma vez, sem impedir o funcionamento da V1."""
+    global V2_INICIALIZADA, V2_DISPONIVEL, V2_ERRO_INICIALIZACAO
+    with lock_v2:
+        if V2_INICIALIZADA:
+            return V2_DISPONIVEL
+        try:
+            storage.inicializar_banco(V2_DB)
+        except Exception as erro:  # A V1 continua disponível se a V2 falhar.
+            V2_ERRO_INICIALIZACAO = erro
+            V2_DISPONIVEL = False
+            print(f"Erro ao inicializar o SQLite da V2: {erro}", file=sys.stderr)
+        else:
+            V2_DISPONIVEL = True
+        V2_INICIALIZADA = True
+        return V2_DISPONIVEL
+
+
+PADRAO_VALOR_COM_VIRGULA = re.compile(
+    r"(?:0|[1-9]\d{0,2}(?:\.\d{3})*|[1-9]\d*)(?:,\d{1,2})?"
+)
+PADRAO_VALOR_COM_PONTO = re.compile(r"(?:0|[1-9]\d*)(?:\.\d{1,2})?")
+
+
+def valor_para_centavos(texto):
+    """Converte valor brasileiro ou decimal simples em centavos, sem float."""
+    if not isinstance(texto, str):
+        raise ValueError("Informe um saldo inicial válido.")
+    valor = texto.strip()
+    if valor.startswith("R$"):
+        valor = valor[2:].strip()
+    elif "R$" in valor:
+        raise ValueError("Informe um saldo inicial válido.")
+
+    if not valor:
+        raise ValueError("Informe um saldo inicial válido.")
+    if "," in valor:
+        if not PADRAO_VALOR_COM_VIRGULA.fullmatch(valor):
+            raise ValueError("Informe um saldo inicial válido.")
+        normalizado = valor.replace(".", "").replace(",", ".")
+    else:
+        if not PADRAO_VALOR_COM_PONTO.fullmatch(valor):
+            raise ValueError("Informe um saldo inicial válido.")
+        normalizado = valor
+
+    try:
+        decimal = Decimal(normalizado)
+    except InvalidOperation as erro:
+        raise ValueError("Informe um saldo inicial válido.") from erro
+    if not decimal.is_finite() or decimal < 0:
+        raise ValueError("Informe um saldo inicial válido.")
+    return int(decimal * 100)
 
 
 lock = threading.Lock()
@@ -612,6 +676,7 @@ PAGINA_ADMIN = """<!DOCTYPE html>
 </head>
 <body>
   <h1>Painel do professor - Mulheres Mil Bank</h1>
+  <p><a href="/admin/turmas">Gerenciar turmas da V2</a></p>
   <table>
     <tr><th>Aluna</th><th>Agência</th><th>Conta (chave Pix)</th><th>Saldo</th><th>Transações</th></tr>
     {linhas}
@@ -658,6 +723,50 @@ PAGINA_LOGIN_ADMIN = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+
+ESTILO_TURMAS = """
+<style>
+  body { font-family:-apple-system,Arial,sans-serif; background:#FAF6EF; color:#1F2A28; margin:0; padding:20px; }
+  main { max-width:980px; margin:0 auto; }
+  h1,h2 { color:#5B2C82; } h1 { font-size:24px; } h2 { font-size:18px; }
+  a { color:#5B2C82; font-weight:700; } .acoes { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
+  .botao, button { display:inline-block; border:0; border-radius:8px; padding:10px 14px; background:#5B2C82; color:#fff; font-weight:700; cursor:pointer; text-decoration:none; }
+  .perigo { background:#B23A2E; } .secundario { background:#fff; color:#5B2C82; border:1px solid #5B2C82; }
+  .cartao { background:#fff; border-radius:12px; padding:18px; margin:14px 0; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .dados { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; } .rotulo { color:#5B6E6A; font-size:12px; }
+  table { width:100%; border-collapse:collapse; background:#fff; } th,td { text-align:left; padding:10px; border-bottom:1px solid #E8DFEF; vertical-align:top; } th { background:#5B2C82; color:#fff; }
+  label { display:block; margin:14px 0 5px; font-weight:700; } input,textarea { width:100%; box-sizing:border-box; padding:10px; border:1px solid #D7CBDD; border-radius:8px; font:inherit; }
+  textarea { min-height:80px; } .linha { display:grid; grid-template-columns:1fr 1fr; gap:12px; } .status { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+  .ATIVA { background:#DDF3E5; color:#17643A; } .AGENDADA { background:#E8DFEF; color:#5B2C82; } .EXPIRADA,.ENCERRADA { background:#FBEAE7; color:#8E3026; }
+  .erro { background:#FBEAE7; color:#8E3026; padding:10px; border-radius:8px; } .aviso { color:#5B6E6A; font-size:13px; }
+  @media (max-width:600px) { body { padding:12px; } .linha { grid-template-columns:1fr; } th,td { font-size:13px; padding:8px; } }
+</style>
+"""
+
+
+PAGINA_TURMAS = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Turmas - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
+<p><a href="/admin">← Painel do professor</a></p><div class="acoes"><h1>Turmas</h1><a class="botao" href="/admin/turmas/nova">Nova turma</a></div>
+__CONTEUDO__
+</main></body></html>"""
+
+
+PAGINA_NOVA_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Nova turma - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
+<p><a href="/admin/turmas">← Turmas</a></p><h1>Nova turma</h1>__ERRO__
+<form class="cartao" method="POST" action="/admin/turmas/criar"><label for="nome">Nome da turma *</label><input id="nome" name="nome" required value="__NOME__">
+<label for="descricao">Descrição</label><textarea id="descricao" name="descricao">__DESCRICAO__</textarea>
+<div class="linha"><div><label for="inicio_data">Data de início *</label><input id="inicio_data" name="inicio_data" type="date" required value="__INICIO_DATA__"></div><div><label for="inicio_hora">Hora de início *</label><input id="inicio_hora" name="inicio_hora" type="time" required value="__INICIO_HORA__"></div></div>
+<div class="linha"><div><label for="validade_data">Data de validade *</label><input id="validade_data" name="validade_data" type="date" required value="__VALIDADE_DATA__"></div><div><label for="validade_hora">Hora de validade *</label><input id="validade_hora" name="validade_hora" type="time" required value="__VALIDADE_HORA__"></div></div>
+<label for="saldo_inicial">Saldo inicial *</label><input id="saldo_inicial" name="saldo_inicial" inputmode="decimal" value="__SALDO__" required>
+<label for="senha">Senha inicial das contas *</label><input id="senha" name="senha" type="password" required><label><input type="checkbox" onclick="document.getElementById('senha').type=this.checked?'text':'password'"> Mostrar senha</label>
+<button type="submit">Criar turma</button></form></main></body></html>"""
+
+
+PAGINA_DETALHE_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Gerenciar turma - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
+<p><a href="/admin/turmas">← Turmas</a></p><h1>__NOME__</h1>__ERRO__<div class="cartao"><span class="status __STATUS__">__STATUS__</span><p>__DESCRICAO__</p><div class="dados"><div><div class="rotulo">Início</div>__INICIO__</div><div><div class="rotulo">Validade</div>__VALIDADE__</div><div><div class="rotulo">Saldo inicial</div>__SALDO__</div><div><div class="rotulo">Alunas</div>__QUANTIDADE__</div><div><div class="rotulo">Criada em</div>__CRIADA__</div></div></div>
+<div class="cartao"><h2>Alterar validade</h2><form method="POST" action="/admin/turmas/__ID__/validade"><div class="linha"><div><label for="validade_data">Data</label><input id="validade_data" name="validade_data" type="date" required value="__VALIDADE_DATA__"></div><div><label for="validade_hora">Hora</label><input id="validade_hora" name="validade_hora" type="time" required value="__VALIDADE_HORA__"></div></div><button type="submit">Alterar validade</button></form></div>
+<div class="cartao"><h2>Encerrar turma</h2><p class="aviso">Uma turma encerrada não pode ser reaberta nesta etapa.</p><form method="POST" action="/admin/turmas/__ID__/encerrar" onsubmit="return confirm('Encerrar esta turma? As contas não poderão operar.');"><button class="perigo" type="submit">Encerrar turma</button></form></div>
+</main></body></html>"""
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +857,45 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return codigo
 
+    def exigir_admin_html(self):
+        if self.tem_sessao_admin():
+            return True
+        self.redirecionar("/admin/login")
+        return False
+
+    def exigir_v2_disponivel(self):
+        if inicializar_v2():
+            return True
+        self.enviar_html(
+            "<h1>Gestão de turmas indisponível</h1>"
+            "<p>Não foi possível inicializar os dados da V2. "
+            "Verifique o servidor e tente novamente.</p>",
+            status=503,
+        )
+        return False
+
+    def data_hora_formulario(self, campos, prefixo):
+        data = (campos.get(f"{prefixo}_data") or [""])[0]
+        hora = (campos.get(f"{prefixo}_hora") or [""])[0]
+        try:
+            return datetime.strptime(f"{data} {hora}", "%Y-%m-%d %H:%M")
+        except ValueError as erro:
+            raise ValueError("Informe uma data e hora válidas.") from erro
+
+    def formatar_data_hora(self, valor):
+        return datetime.fromisoformat(valor).strftime("%d/%m/%Y às %H:%M")
+
+    def formatar_centavos(self, valor):
+        reais, centavos = divmod(valor, 100)
+        numero = f"{reais:,}".replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {numero},{centavos:02d}"
+
+    def id_turma_da_rota(self, caminho):
+        partes = caminho.strip("/").split("/")
+        if len(partes) >= 3 and partes[:2] == ["admin", "turmas"] and partes[2].isdigit():
+            return int(partes[2])
+        return None
+
     # -- rotas ------------------------------------------------------------
 
     def do_GET(self):
@@ -786,6 +934,31 @@ class Handler(BaseHTTPRequestHandler):
                 self.redirecionar("/admin")
                 return
             self.enviar_html(PAGINA_LOGIN_ADMIN.replace("{erro}", ""))
+            return
+
+        if caminho == "/admin/turmas":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_turmas()
+            return
+
+        if caminho == "/admin/turmas/nova":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_formulario_turma()
+            return
+
+        turma_id = self.id_turma_da_rota(caminho)
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            self.mostrar_detalhe_turma(turma_id)
             return
 
         if caminho == "/api/me":
@@ -964,6 +1137,57 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if caminho == "/admin/turmas/criar":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            campos = self.ler_formulario()
+            try:
+                nome = (campos.get("nome") or [""])[0]
+                descricao = (campos.get("descricao") or [""])[0].strip() or None
+                inicio = self.data_hora_formulario(campos, "inicio")
+                validade = self.data_hora_formulario(campos, "validade")
+                saldo = valor_para_centavos((campos.get("saldo_inicial") or [""])[0])
+                senha = (campos.get("senha") or [""])[0]
+                if not senha.strip():
+                    raise ValueError("Informe a senha inicial das contas.")
+                turma = storage.criar_turma(V2_DB, nome, inicio, validade, saldo, senha, descricao)
+            except (ValueError, storage.ErroStorage) as erro:
+                self.mostrar_formulario_turma(str(erro), campos, status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma['id']}")
+            return
+
+        turma_id = self.id_turma_da_rota(caminho)
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/encerrar":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            try:
+                storage.encerrar_turma(V2_DB, turma_id)
+            except storage.ErroStorage as erro:
+                self.mostrar_detalhe_turma(turma_id, str(erro), status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
+            return
+
+        if turma_id is not None and caminho == f"/admin/turmas/{turma_id}/validade":
+            if not self.exigir_admin_html():
+                return
+            if not self.exigir_v2_disponivel():
+                return
+            campos = self.ler_formulario()
+            try:
+                validade = self.data_hora_formulario(campos, "validade")
+                storage.alterar_validade_turma(V2_DB, turma_id, validade)
+            except (ValueError, storage.ErroStorage) as erro:
+                self.mostrar_detalhe_turma(turma_id, str(erro), status=400)
+                return
+            self.redirecionar(f"/admin/turmas/{turma_id}")
+            return
+
         if caminho == "/admin/resetar":
             if not self.tem_sessao_admin():
                 self.enviar_html("<h1>Acesso não autorizado</h1>", status=403)
@@ -994,6 +1218,89 @@ class Handler(BaseHTTPRequestHandler):
         pagina = PAGINA_ADMIN.format(linhas=linhas)
         self.enviar_html(pagina)
 
+    def mostrar_turmas(self):
+        turmas = storage.listar_turmas(V2_DB)
+        if not turmas:
+            conteudo = '<div class="cartao"><p>Nenhuma turma criada ainda.</p></div>'
+        else:
+            linhas = ""
+            for turma in turmas:
+                descricao = html.escape(turma["descricao"] or "—")
+                status = turma["status"]
+                linhas += (
+                    "<tr>"
+                    f"<td><strong>{html.escape(turma['nome'])}</strong><br><span class=\"aviso\">{descricao}</span></td>"
+                    f"<td><span class=\"status {status}\">{status}</span></td>"
+                    f"<td>{turma['quantidade_alunas']}</td>"
+                    f"<td>{self.formatar_centavos(turma['saldo_inicial'])}</td>"
+                    f"<td>{self.formatar_data_hora(turma['inicio_em'])}</td>"
+                    f"<td>{self.formatar_data_hora(turma['validade_em'])}</td>"
+                    f"<td><a class=\"botao secundario\" href=\"/admin/turmas/{turma['id']}\">Gerenciar</a></td>"
+                    "</tr>"
+                )
+            conteudo = (
+                "<div class=\"cartao\"><table><tr><th>Turma</th><th>Status</th><th>Alunas</th>"
+                f"<th>Saldo inicial</th><th>Início</th><th>Validade</th><th>Ação</th></tr>{linhas}</table></div>"
+            )
+        pagina = PAGINA_TURMAS.replace("__ESTILO__", ESTILO_TURMAS).replace("__CONTEUDO__", conteudo)
+        self.enviar_html(pagina)
+
+    def mostrar_formulario_turma(self, erro=None, campos=None, status=200):
+        campos = campos or {}
+        agora = storage.agora_local()
+        inicio = agora.replace(second=0, microsecond=0)
+        validade = inicio + timedelta(hours=2)
+
+        def valor(nome, padrao=""):
+            return html.escape((campos.get(nome) or [padrao])[0])
+
+        mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
+        pagina = PAGINA_NOVA_TURMA
+        substituicoes = {
+            "__ESTILO__": ESTILO_TURMAS,
+            "__ERRO__": mensagem,
+            "__NOME__": valor("nome"),
+            "__DESCRICAO__": valor("descricao"),
+            "__INICIO_DATA__": valor("inicio_data", inicio.strftime("%Y-%m-%d")),
+            "__INICIO_HORA__": valor("inicio_hora", inicio.strftime("%H:%M")),
+            "__VALIDADE_DATA__": valor("validade_data", validade.strftime("%Y-%m-%d")),
+            "__VALIDADE_HORA__": valor("validade_hora", validade.strftime("%H:%M")),
+            "__SALDO__": valor("saldo_inicial", "1000,00"),
+        }
+        for marcador, conteudo in substituicoes.items():
+            pagina = pagina.replace(marcador, conteudo)
+        self.enviar_html(pagina, status=status)
+
+    def mostrar_detalhe_turma(self, turma_id, erro=None, status=200):
+        try:
+            turma = storage.buscar_turma(V2_DB, turma_id)
+        except storage.ContaNaoEncontrada:
+            self.enviar_html("<h1>Turma não encontrada</h1>", status=404)
+            return
+        status_turma = storage.status_turma(turma)
+        validade = datetime.fromisoformat(turma["validade_em"])
+        mensagem = f'<p class="erro">{html.escape(erro)}</p>' if erro else ""
+        descricao = html.escape(turma["descricao"] or "Sem descrição.")
+        pagina = PAGINA_DETALHE_TURMA
+        substituicoes = {
+            "__ESTILO__": ESTILO_TURMAS,
+            "__ERRO__": mensagem,
+            "__NOME__": html.escape(turma["nome"]),
+            "__DESCRICAO__": descricao,
+            "__STATUS__": status_turma,
+            "__INICIO__": self.formatar_data_hora(turma["inicio_em"]),
+            "__VALIDADE__": self.formatar_data_hora(turma["validade_em"]),
+            "__SALDO__": self.formatar_centavos(turma["saldo_inicial"]),
+            "__QUANTIDADE__": str(storage.contar_alunas_turma(V2_DB, turma_id)),
+            "__CRIADA__": self.formatar_data_hora(turma["criada_em"]),
+            "__ID__": str(turma_id),
+            "__VALIDADE_DATA__": validade.strftime("%Y-%m-%d"),
+            "__VALIDADE_HORA__": validade.strftime("%H:%M"),
+        }
+        for marcador, conteudo in substituicoes.items():
+            pagina = pagina.replace(marcador, conteudo)
+        self.enviar_html(pagina, status=status)
+
     def redirecionar(self, destino):
         self.send_response(303)
         self.send_header("Location", destino)
@@ -1013,6 +1320,7 @@ def descobrir_ip_local():
 
 
 def main():
+    inicializar_v2()
     ip = descobrir_ip_local()
     servidor = ThreadingHTTPServer(("0.0.0.0", PORTA), Handler)
     print("=" * 60)

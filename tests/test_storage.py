@@ -81,6 +81,42 @@ class StorageTestCase(unittest.TestCase):
         encerrada = storage.encerrar_turma(self.banco, turma["id"], self.agora)
         self.assertEqual(storage.status_turma(encerrada, self.agora), "ENCERRADA")
 
+    def test_lista_turmas_com_status_e_ordenacao(self):
+        expirada = self.criar_turma_ativa(
+            nome="Expirada", inicio_em=self.agora - timedelta(days=2),
+            validade_em=self.agora - timedelta(days=1),
+        )
+        ativa = self.criar_turma_ativa(nome="Ativa")
+        turmas = storage.listar_turmas(self.banco, self.agora)
+        self.assertEqual([turma["id"] for turma in turmas], [ativa["id"], expirada["id"]])
+        self.assertEqual(turmas[0]["status"], "ATIVA")
+        self.assertEqual(turmas[0]["quantidade_alunas"], 0)
+
+    def test_conta_alunas_da_turma(self):
+        turma = self.criar_turma_ativa()
+        storage.criar_aluna(self.banco, turma["id"], "Ana")
+        storage.criar_aluna(self.banco, turma["id"], "Bia")
+        self.assertEqual(storage.contar_alunas_turma(self.banco, turma["id"]), 2)
+
+    def test_altera_validade_da_turma(self):
+        turma = self.criar_turma_ativa()
+        nova_validade = self.agora + timedelta(days=2)
+        alterada = storage.alterar_validade_turma(self.banco, turma["id"], nova_validade)
+        self.assertEqual(storage.status_turma(alterada, self.agora), "ATIVA")
+        self.assertEqual(storage._de_iso(alterada["validade_em"]), nova_validade)
+
+    def test_rejeita_validade_anterior_ao_inicio(self):
+        turma = self.criar_turma_ativa()
+        with self.assertRaises(storage.ValorInvalido):
+            storage.alterar_validade_turma(self.banco, turma["id"], self.agora - timedelta(days=2))
+
+    def test_alterar_validade_de_turma_encerrada_nao_reabre(self):
+        turma = self.criar_turma_ativa()
+        storage.encerrar_turma(self.banco, turma["id"], self.agora)
+        alterada = storage.alterar_validade_turma(self.banco, turma["id"], self.agora + timedelta(days=2))
+        self.assertIsNotNone(alterada["encerrada_em"])
+        self.assertEqual(storage.status_turma(alterada, self.agora), "ENCERRADA")
+
     def test_cria_aluna_com_saldo_inicial(self):
         turma = self.criar_turma_ativa(saldo_inicial_centavos=12_345)
         aluna = storage.criar_aluna(self.banco, turma["id"], "Ana")

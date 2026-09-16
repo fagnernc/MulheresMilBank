@@ -207,6 +207,35 @@ def buscar_turma(caminho_banco, turma_id):
     return dict(linha)
 
 
+def listar_turmas(caminho_banco, agora=None, timezone_nome=None):
+    """Lista turmas com a quantidade de alunas, sem consultas por turma."""
+    with conexao(caminho_banco) as banco:
+        linhas = banco.execute(
+            """SELECT turmas.*, COUNT(alunas.id) AS quantidade_alunas
+               FROM turmas
+               LEFT JOIN alunas ON alunas.turma_id = turmas.id
+               GROUP BY turmas.id
+               ORDER BY turmas.criada_em DESC, turmas.id DESC"""
+        ).fetchall()
+    turmas = []
+    prioridade = {"ATIVA": 0, "AGENDADA": 1, "EXPIRADA": 2, "ENCERRADA": 3}
+    for linha in linhas:
+        turma = dict(linha)
+        turma["status"] = status_turma(turma, agora, timezone_nome)
+        turmas.append(turma)
+    # A consulta já traz as mais recentes primeiro; a ordenação estável mantém
+    # essa ordem dentro de cada grupo de status.
+    return sorted(turmas, key=lambda turma: prioridade[turma["status"]])
+
+
+def contar_alunas_turma(caminho_banco, turma_id):
+    with conexao(caminho_banco) as banco:
+        linha = banco.execute(
+            "SELECT COUNT(*) AS quantidade FROM alunas WHERE turma_id = ?", (turma_id,)
+        ).fetchone()
+    return linha["quantidade"]
+
+
 def status_turma(turma, agora=None, timezone_nome=None):
     if turma["encerrada_em"] is not None:
         return "ENCERRADA"
@@ -228,6 +257,24 @@ def encerrar_turma(caminho_banco, turma_id, agora=None, timezone_nome=None):
         )
         if cursor.rowcount != 1:
             raise ContaNaoEncontrada("Turma não encontrada.")
+        banco.commit()
+    return buscar_turma(caminho_banco, turma_id)
+
+
+def alterar_validade_turma(caminho_banco, turma_id, validade_em, timezone_nome=None):
+    """Altera somente a validade; uma turma encerrada permanece encerrada."""
+    nova_validade = agora_local(validade_em, timezone_nome)
+    with conexao(caminho_banco) as banco:
+        turma = banco.execute("SELECT inicio_em FROM turmas WHERE id = ?", (turma_id,)).fetchone()
+        if turma is None:
+            raise ContaNaoEncontrada("Turma não encontrada.")
+        inicio = _de_iso(turma["inicio_em"], timezone_nome)
+        if nova_validade < inicio:
+            raise ValorInvalido("A validade não pode ser anterior ao início.")
+        banco.execute(
+            "UPDATE turmas SET validade_em = ? WHERE id = ?",
+            (_para_iso(nova_validade, timezone_nome), turma_id),
+        )
         banco.commit()
     return buscar_turma(caminho_banco, turma_id)
 
