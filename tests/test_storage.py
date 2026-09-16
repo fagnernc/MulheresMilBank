@@ -378,6 +378,39 @@ class StorageTestCase(unittest.TestCase):
         with self.assertRaises(storage.TurmaInativa):
             storage.executar_pix(self.banco, turma["id"], origem["id"], destino["id"], 100, self.agora)
 
+    def test_estatisticas_de_turma_sem_movimentacao_sao_zero(self):
+        turma = self.criar_turma_ativa()
+        storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        self.assertEqual(
+            storage.obter_estatisticas_turma(self.banco, turma["id"]),
+            {"participantes": 1, "fizeram_pix": 0, "transacoes": 0, "movimentado": 0},
+        )
+
+    def test_estatisticas_contam_transacoes_origens_unicas_e_soma(self):
+        turma = self.criar_turma_ativa()
+        ana = storage.criar_aluna(self.banco, turma["id"], "Ana", agora=self.agora)
+        bia = storage.criar_aluna(self.banco, turma["id"], "Bia", agora=self.agora)
+        clara = storage.criar_aluna(self.banco, turma["id"], "Clara", agora=self.agora)
+        storage.executar_pix(self.banco, turma["id"], ana["id"], bia["id"], 100, self.agora)
+        storage.executar_pix(self.banco, turma["id"], ana["id"], clara["id"], 200, self.agora)
+        estatisticas = storage.obter_estatisticas_turma(self.banco, turma["id"])
+        self.assertEqual(estatisticas["participantes"], 3)
+        self.assertEqual(estatisticas["transacoes"], 2)
+        self.assertEqual(estatisticas["movimentado"], 300)
+        self.assertEqual(estatisticas["fizeram_pix"], 1)
+
+    def test_estatisticas_nao_misturam_turmas(self):
+        primeira = self.criar_turma_ativa(nome="Primeira")
+        segunda = self.criar_turma_ativa(nome="Segunda")
+        origem = storage.criar_aluna(self.banco, primeira["id"], "Ana", agora=self.agora)
+        destino = storage.criar_aluna(self.banco, primeira["id"], "Bia", agora=self.agora)
+        storage.criar_aluna(self.banco, segunda["id"], "Cia", agora=self.agora)
+        storage.executar_pix(self.banco, primeira["id"], origem["id"], destino["id"], 500, self.agora)
+        self.assertEqual(
+            storage.obter_estatisticas_turma(self.banco, segunda["id"]),
+            {"participantes": 1, "fizeram_pix": 0, "transacoes": 0, "movimentado": 0},
+        )
+
     def test_pix_e_atomico_se_registro_da_transacao_falhar(self):
         turma = self.criar_turma_ativa()
         origem = storage.criar_aluna(self.banco, turma["id"], "Ana")

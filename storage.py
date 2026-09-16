@@ -253,6 +253,20 @@ def contar_alunas_turma(caminho_banco, turma_id):
     return linha["quantidade"]
 
 
+def obter_estatisticas_turma(caminho_banco, turma_id):
+    """Retorna indicadores agregados da atividade em uma única consulta."""
+    with conexao(caminho_banco) as banco:
+        linha = banco.execute(
+            """SELECT
+                (SELECT COUNT(*) FROM alunas WHERE turma_id = ?) AS participantes,
+                (SELECT COUNT(DISTINCT origem_aluna_id) FROM transacoes WHERE turma_id = ?) AS fizeram_pix,
+                (SELECT COUNT(*) FROM transacoes WHERE turma_id = ?) AS transacoes,
+                (SELECT COALESCE(SUM(valor), 0) FROM transacoes WHERE turma_id = ?) AS movimentado""",
+            (turma_id, turma_id, turma_id, turma_id),
+        ).fetchone()
+    return dict(linha)
+
+
 def status_turma(turma, agora=None, timezone_nome=None):
     if turma["encerrada_em"] is not None:
         return "ENCERRADA"

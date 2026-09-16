@@ -737,13 +737,14 @@ ESTILO_TURMAS = """
   .botao, button { display:inline-block; border:0; border-radius:8px; padding:10px 14px; background:#5B2C82; color:#fff; font-weight:700; cursor:pointer; text-decoration:none; }
   .perigo { background:#B23A2E; } .secundario { background:#fff; color:#5B2C82; border:1px solid #5B2C82; }
   .cartao { background:#fff; border-radius:12px; padding:18px; margin:14px 0; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .estatisticas { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:10px; } .indicador { background:#FAF6EF; border-radius:9px; padding:12px; } .indicador strong { display:block; color:#5B2C82; font-size:23px; margin-top:4px; }
   .dados { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; } .rotulo { color:#5B6E6A; font-size:12px; }
   table { width:100%; border-collapse:collapse; background:#fff; } th,td { text-align:left; padding:10px; border-bottom:1px solid #E8DFEF; vertical-align:top; } th { background:#5B2C82; color:#fff; }
   label { display:block; margin:14px 0 5px; font-weight:700; } input,textarea { width:100%; box-sizing:border-box; padding:10px; border:1px solid #D7CBDD; border-radius:8px; font:inherit; }
   textarea { min-height:80px; } .linha { display:grid; grid-template-columns:1fr 1fr; gap:12px; } .status { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; }
   .ATIVA { background:#DDF3E5; color:#17643A; } .AGENDADA { background:#E8DFEF; color:#5B2C82; } .EXPIRADA,.ENCERRADA { background:#FBEAE7; color:#8E3026; }
   .erro { background:#FBEAE7; color:#8E3026; padding:10px; border-radius:8px; } .aviso { color:#5B6E6A; font-size:13px; }
-  @media (max-width:600px) { body { padding:12px; } .linha { grid-template-columns:1fr; } th,td { font-size:13px; padding:8px; } }
+  @media (max-width:600px) { body { padding:12px; } .linha { grid-template-columns:1fr; } .estatisticas { grid-template-columns:repeat(2,minmax(0,1fr)); } th,td { font-size:13px; padding:8px; } }
 </style>
 """
 
@@ -767,6 +768,7 @@ PAGINA_NOVA_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UT
 
 PAGINA_DETALHE_TURMA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Gerenciar turma - Mulheres Mil Bank</title>__ESTILO__</head><body><main>
 <p><a href="/admin/turmas">← Turmas</a></p><h1>__NOME__</h1>__ERRO__<div class="cartao"><span class="status __STATUS__">__STATUS__</span><p>__DESCRICAO__</p><div class="dados"><div><div class="rotulo">Início</div>__INICIO__</div><div><div class="rotulo">Validade</div>__VALIDADE__</div><div><div class="rotulo">Saldo inicial</div>__SALDO__</div><div><div class="rotulo">Alunas</div>__QUANTIDADE__</div><div><div class="rotulo">Criada em</div>__CRIADA__</div></div></div>
+<div class="cartao"><h2>Resumo da atividade</h2><div class="estatisticas"><div class="indicador"><div class="rotulo">Participantes</div><strong>__EST_PARTICIPANTES__</strong></div><div class="indicador"><div class="rotulo">Fizeram Pix</div><strong>__EST_FIZERAM_PIX__</strong></div><div class="indicador"><div class="rotulo">Transações</div><strong>__EST_TRANSACOES__</strong></div><div class="indicador"><div class="rotulo">Movimentado</div><strong>__EST_MOVIMENTADO__</strong></div></div></div>
 <div class="cartao"><h2>Alunas</h2><p>__QUANTIDADE__ cadastradas</p>__ACOES_ALUNAS____LISTA_ALUNAS__</div>
 <div class="cartao"><h2>Alterar validade</h2><form method="POST" action="/admin/turmas/__ID__/validade"><div class="linha"><div><label for="validade_data">Data</label><input id="validade_data" name="validade_data" type="date" required value="__VALIDADE_DATA__"></div><div><label for="validade_hora">Hora</label><input id="validade_hora" name="validade_hora" type="time" required value="__VALIDADE_HORA__"></div></div><button type="submit">Alterar validade</button></form></div>
 <div class="cartao"><h2>Encerrar turma</h2><p class="aviso">Uma turma encerrada não pode ser reaberta nesta etapa.</p><form method="POST" action="/admin/turmas/__ID__/encerrar" onsubmit="return confirm('Encerrar esta turma? As contas não poderão operar.');"><button class="perigo" type="submit">Encerrar turma</button></form></div>
@@ -1574,6 +1576,7 @@ class Handler(BaseHTTPRequestHandler):
         descricao = html.escape(turma["descricao"] or "Sem descrição.")
         pode_alterar_alunas = status_turma in ("AGENDADA", "ATIVA")
         alunas = storage.listar_alunas_turma(V2_DB, turma_id)
+        estatisticas = storage.obter_estatisticas_turma(V2_DB, turma_id)
         if alunas:
             linhas_alunas = ""
             for aluna in alunas:
@@ -1636,6 +1639,10 @@ class Handler(BaseHTTPRequestHandler):
             "__ID__": str(turma_id),
             "__VALIDADE_DATA__": validade.strftime("%Y-%m-%d"),
             "__VALIDADE_HORA__": validade.strftime("%H:%M"),
+            "__EST_PARTICIPANTES__": str(estatisticas["participantes"]),
+            "__EST_FIZERAM_PIX__": str(estatisticas["fizeram_pix"]),
+            "__EST_TRANSACOES__": str(estatisticas["transacoes"]),
+            "__EST_MOVIMENTADO__": self.formatar_centavos(estatisticas["movimentado"]),
             "__ACOES_ALUNAS__": acoes_alunas,
             "__LISTA_ALUNAS__": lista_alunas,
         }
