@@ -937,7 +937,10 @@ class Handler(BaseHTTPRequestHandler):
         if caminho == "/admin/login":
             campos = self.ler_formulario()
             codigo = (campos.get("codigo") or [""])[0]
-            if not hmac.compare_digest(codigo, CODIGO_ADMIN):
+            if not hmac.compare_digest(
+                codigo.encode("utf-8"),
+                CODIGO_ADMIN.encode("utf-8"),
+            ):
                 erro = '<p class="erro">Código incorreto.</p>'
                 self.enviar_html(PAGINA_LOGIN_ADMIN.replace("{erro}", erro), status=403)
                 return
